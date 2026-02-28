@@ -1,0 +1,110 @@
+import { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { hostsApi } from '../api/hosts';
+import { sessionsApi } from '../api/sessions';
+import { StatusBadge } from '../components/StatusBadge';
+import type { Host } from '../types/host';
+import type { Session } from '../types/session';
+import { ArrowLeft } from 'lucide-react';
+
+export function HostDetail() {
+  const { id } = useParams<{ id: string }>();
+  const [host, setHost] = useState<Host | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+    hostsApi.get(id).then(setHost).catch((e) => setError(e.message));
+    sessionsApi.list({ host_id: id }).then(setSessions).catch(() => {});
+  }, [id]);
+
+  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (!host) return <div className="p-6 text-gray-500">Loading...</div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center gap-3">
+        <Link to="/hosts" className="text-gray-500 hover:text-gray-300">
+          <ArrowLeft size={18} />
+        </Link>
+        <h1 className="text-2xl font-bold">{host.name}</h1>
+        <StatusBadge status={host.status} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase">Connection</h2>
+          <div className="text-sm"><span className="text-gray-500">Hostname:</span> {host.hostname}</div>
+          <div className="text-sm"><span className="text-gray-500">SSH:</span> {host.ssh_user}@{host.hostname}:{host.ssh_port}</div>
+          <div className="text-sm"><span className="text-gray-500">Key:</span> <span className="font-mono text-xs">{host.ssh_key_path}</span></div>
+        </div>
+
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase">System</h2>
+          <div className="text-sm"><span className="text-gray-500">OS/Arch:</span> {host.os || 'unknown'}/{host.arch || 'unknown'}</div>
+          <div className="text-sm"><span className="text-gray-500">Agent:</span> {host.agent_version || 'not installed'}</div>
+          <div className="text-sm"><span className="text-gray-500">Max Sessions:</span> {host.max_sessions}</div>
+          <div className="text-sm"><span className="text-gray-500">Base Repo:</span> <span className="font-mono text-xs">{host.base_repo_path}</span></div>
+        </div>
+      </div>
+
+      {Object.keys(host.labels || {}).length > 0 && (
+        <div className="flex gap-2">
+          {Object.entries(host.labels).map(([k, v]) => (
+            <span key={k} className="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">
+              {k}={v}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(host.installed_tools?.length ?? 0) > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase mb-2">Installed Tools</h2>
+          <div className="flex flex-wrap gap-2">
+            {host.installed_tools.map((t) => (
+              <span key={t.name} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                {t.name} {t.version && <span className="text-gray-500">v{t.version}</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Sessions on this host</h2>
+        {sessions.length === 0 ? (
+          <p className="text-gray-500 text-sm">No sessions.</p>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 text-gray-400 text-left">
+                  <th className="px-4 py-2">Name</th>
+                  <th className="px-4 py-2">Agent</th>
+                  <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2">Branch</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((sess) => (
+                  <tr key={sess.id} className="border-b border-gray-800/50">
+                    <td className="px-4 py-2">
+                      <Link to={`/sessions/${sess.id}`} className="text-blue-400 hover:underline">
+                        {sess.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-gray-400">{sess.agent_type}</td>
+                    <td className="px-4 py-2"><StatusBadge status={sess.status} /></td>
+                    <td className="px-4 py-2 text-gray-400 font-mono text-xs">{sess.branch_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

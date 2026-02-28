@@ -1,0 +1,26 @@
+# Binaries
+bin/
+swoopsd
+swoops-agent
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Go
+vendor/
+
+# Frontend
+web/node_modules/
+web/dist/
+server/internal/frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

@@ -1,0 +1,120 @@
+import { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { sessionsApi } from '../api/sessions';
+import { hostsApi } from '../api/hosts';
+import { StatusBadge } from '../components/StatusBadge';
+import type { Session } from '../types/session';
+import type { Host } from '../types/host';
+import { ArrowLeft, Square, Send } from 'lucide-react';
+
+export function SessionDetail() {
+  const { id } = useParams<{ id: string }>();
+  const [session, setSession] = useState<Session | null>(null);
+  const [host, setHost] = useState<Host | null>(null);
+  const [error, setError] = useState('');
+  const [inputText, setInputText] = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+    sessionsApi.get(id).then((s) => {
+      setSession(s);
+      hostsApi.get(s.host_id).then(setHost).catch(() => {});
+    }).catch((e) => setError(e.message));
+  }, [id]);
+
+  const handleStop = async () => {
+    if (!id) return;
+    await sessionsApi.stop(id);
+    setSession((s) => s ? { ...s, status: 'stopped' } : s);
+  };
+
+  const handleSendInput = async () => {
+    if (!id || !inputText.trim()) return;
+    await sessionsApi.sendInput(id, inputText);
+    setInputText('');
+  };
+
+  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (!session) return <div className="p-6 text-gray-500">Loading...</div>;
+
+  const isActive = ['running', 'starting', 'pending', 'idle'].includes(session.status);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center gap-3">
+        <Link to="/sessions" className="text-gray-500 hover:text-gray-300">
+          <ArrowLeft size={18} />
+        </Link>
+        <h1 className="text-2xl font-bold">{session.name}</h1>
+        <StatusBadge status={session.status} />
+        <span className="text-sm text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{session.agent_type}</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase">Details</h2>
+          <div className="text-sm"><span className="text-gray-500">Host:</span>{' '}
+            {host ? (
+              <Link to={`/hosts/${host.id}`} className="text-blue-400 hover:underline">{host.name}</Link>
+            ) : session.host_id.slice(0, 8)}
+          </div>
+          <div className="text-sm"><span className="text-gray-500">Branch:</span> <span className="font-mono text-xs">{session.branch_name}</span></div>
+          {session.model_override && (
+            <div className="text-sm"><span className="text-gray-500">Model:</span> {session.model_override}</div>
+          )}
+          {session.agent_pid > 0 && (
+            <div className="text-sm"><span className="text-gray-500">PID:</span> {session.agent_pid}</div>
+          )}
+        </div>
+
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2 col-span-2">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase">Prompt</h2>
+          <p className="text-sm whitespace-pre-wrap">{session.prompt}</p>
+        </div>
+      </div>
+
+      {/* Output viewer - placeholder for xterm.js in Phase 2 */}
+      <div className="bg-gray-950 border border-gray-800 rounded-lg">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+          <span className="text-sm text-gray-400">Output</span>
+          {isActive && (
+            <button
+              onClick={handleStop}
+              className="flex items-center gap-1 text-sm text-orange-400 hover:text-orange-300"
+            >
+              <Square size={12} /> Stop
+            </button>
+          )}
+        </div>
+        <div className="p-4 font-mono text-xs text-gray-300 min-h-[200px] max-h-[500px] overflow-auto whitespace-pre-wrap">
+          {session.last_output || <span className="text-gray-600">No output yet. Output streaming will be available in Phase 2.</span>}
+        </div>
+        {isActive && (
+          <div className="flex items-center border-t border-gray-800 px-4 py-2 gap-2">
+            <input
+              className="flex-1 bg-transparent text-sm text-gray-200 outline-none font-mono"
+              placeholder="Send input to session..."
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendInput()}
+            />
+            <button onClick={handleSendInput} className="text-gray-500 hover:text-blue-400">
+              <Send size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {(session.allowed_tools?.length ?? 0) > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase mb-2">Allowed Tools</h2>
+          <div className="flex flex-wrap gap-2">
+            {session.allowed_tools.map((t) => (
+              <span key={t} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded">{t}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
