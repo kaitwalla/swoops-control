@@ -327,20 +327,33 @@ func TestCreateSessionValidation(t *testing.T) {
 func TestTokenQueryParamAuth(t *testing.T) {
 	srv := testServer(t)
 
-	// Auth via query param
+	// Query param auth should only work for WebSocket upgrades, not regular HTTP requests
 	req := httptest.NewRequest("GET", "/api/v1/stats?token="+testAPIKey, nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("auth via query param got %d, want 200", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("auth via query param on non-WS request got %d, want 401", w.Code)
 	}
 
-	// Wrong token via query param
-	req = httptest.NewRequest("GET", "/api/v1/stats?token=wrong-key", nil)
+	// Query param auth SHOULD work for WebSocket upgrade requests
+	req = httptest.NewRequest("GET", "/api/v1/ws/sessions/test-id/output?token="+testAPIKey, nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	// Note: This will still fail because the session doesn't exist, but auth should pass (not 401/403)
+	if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+		t.Errorf("auth via query param on WebSocket request got %d, want non-auth error", w.Code)
+	}
+
+	// Wrong token via query param on WebSocket should still be rejected
+	req = httptest.NewRequest("GET", "/api/v1/ws/sessions/test-id/output?token=wrong-key", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
 	w = httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
-		t.Errorf("auth via wrong query param got %d, want 403", w.Code)
+		t.Errorf("auth via wrong query param on WebSocket got %d, want 403", w.Code)
 	}
 }
 

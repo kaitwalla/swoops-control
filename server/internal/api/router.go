@@ -89,8 +89,9 @@ func (s *Server) setupRoutes() {
 	r.Handle("/metrics", metrics.Handler())
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Health check is unauthenticated
+		// Health check and version are unauthenticated
 		r.Get("/health", s.handleHealth)
+		r.Get("/version", s.handleVersion)
 
 		// All other API routes require authentication
 		r.Group(func(r chi.Router) {

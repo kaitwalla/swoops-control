@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 interface SessionTask {
@@ -25,18 +25,19 @@ export function TaskManagementPanel({ sessionId }: TaskManagementPanelProps) {
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [newTask, setNewTask] = useState({
-    task_type: 'instruction' as const,
+  const [newTask, setNewTask] = useState<{
+    task_type: SessionTask['task_type'];
+    priority: number;
+    title: string;
+    description: string;
+  }>({
+    task_type: 'instruction',
     priority: 0,
     title: '',
     description: ''
   });
 
-  useEffect(() => {
-    loadTasks();
-  }, [sessionId]);
-
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     try {
       const response = await api.get<SessionTask[]>(`/sessions/${sessionId}/tasks`);
       setTasks(response || []);
@@ -45,7 +46,11 @@ export function TaskManagementPanel({ sessionId }: TaskManagementPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
 
   const createTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,7 +108,7 @@ export function TaskManagementPanel({ sessionId }: TaskManagementPanelProps) {
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
             <select
               value={newTask.task_type}
-              onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as any })}
+              onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as SessionTask['task_type'] })}
               className="w-full border rounded px-3 py-2 text-sm"
             >
               <option value="instruction">Instruction</option>

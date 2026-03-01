@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -27,6 +29,43 @@ type createSessionRequest struct {
 
 type sendInputRequest struct {
 	Input string `json:"input"`
+}
+
+// validSessionNamePattern matches alphanumeric, hyphens, underscores, and periods only.
+// This prevents path traversal attacks via session names.
+var validSessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// validEnvVarKeyPattern matches valid environment variable names (POSIX standard).
+// Must start with letter or underscore, followed by letters, digits, or underscores.
+var validEnvVarKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validateSessionName checks if a session name is safe to use in file paths.
+// Returns an error if the name contains path traversal sequences or invalid characters.
+func validateSessionName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	// Only allow safe characters
+	if !validSessionNamePattern.MatchString(name) {
+		return false
+	}
+	// Ensure no hidden path traversal after cleaning
+	cleaned := filepath.Clean(name)
+	if cleaned != name || filepath.IsAbs(cleaned) {
+		return false
+	}
+	return true
+}
+
+// validateEnvVars checks that all environment variable keys are valid POSIX names.
+// This prevents shell injection via malicious env var names like "FOO; malicious".
+func validateEnvVars(envVars map[string]string) (string, bool) {
+	for key := range envVars {
+		if !validEnvVarKeyPattern.MatchString(key) {
+			return key, false
+		}
+	}
+	return "", true
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -75,11 +114,21 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		req.Name = string(req.AgentType) + "-" + models.NewID()[:8]
 	}
+	// Validate session name to prevent path traversal attacks
+	if !validateSessionName(req.Name) {
+		writeError(w, http.StatusBadRequest, "session name contains invalid characters or path traversal sequences")
+		return
+	}
 	if req.BranchName == "" {
 		req.BranchName = "swoops/" + req.Name
 	}
 	if req.EnvVars == nil {
 		req.EnvVars = make(map[string]string)
+	}
+	// Validate environment variable keys to prevent shell injection
+	if invalidKey, ok := validateEnvVars(req.EnvVars); !ok {
+		writeError(w, http.StatusBadRequest, "invalid environment variable key: "+invalidKey)
+		return
 	}
 
 	now := time.Now()

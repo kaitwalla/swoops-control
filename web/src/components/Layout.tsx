@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, Server, Terminal, Puzzle, FileSliders } from 'lucide-react';
+import { UpdateBanner } from './UpdateBanner';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -36,8 +37,11 @@ export function Layout() {
           ))}
         </nav>
       </aside>
-      <main className="flex-1 overflow-auto">
-        <Outlet />
+      <main className="flex-1 overflow-auto flex flex-col">
+        <UpdateBanner />
+        <div className="flex-1 overflow-auto">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

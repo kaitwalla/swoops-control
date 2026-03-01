@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 interface ReviewRequest {
@@ -26,11 +26,7 @@ export function ReviewRequestsPanel({ sessionId }: ReviewRequestsPanelProps) {
   const [selectedReview, setSelectedReview] = useState<ReviewRequest | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
 
-  useEffect(() => {
-    loadReviews();
-  }, [sessionId]);
-
-  const loadReviews = async () => {
+  const loadReviews = useCallback(async () => {
     try {
       const response = await api.get<ReviewRequest[]>(`/reviews?session_id=${sessionId}`);
       setReviews(response || []);
@@ -39,7 +35,11 @@ export function ReviewRequestsPanel({ sessionId }: ReviewRequestsPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadReviews();
+  }, [loadReviews]);
 
   const updateReview = async (reviewId: string, status: string) => {
     try {

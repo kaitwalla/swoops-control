@@ -19,7 +19,7 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Extract token from Authorization header or ?token= query param (for WebSocket)
+			// Extract token from Authorization header or ?token= query param (WebSocket only)
 			var token string
 			authHeader := r.Header.Get("Authorization")
 			if authHeader != "" {
@@ -28,7 +28,9 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 					token = parts[1]
 				}
 			}
-			if token == "" {
+			// Only allow query param auth for WebSocket upgrade requests to avoid token leakage
+			// in logs, browser history, and referrer headers
+			if token == "" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 				token = r.URL.Query().Get("token")
 			}
 			if token == "" {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 interface SessionMessage {
@@ -22,13 +22,7 @@ export function SessionMessagesPanel({ sessionId }: SessionMessagesPanelProps) {
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadMessages();
-    const interval = setInterval(loadMessages, 10000); // Poll every 10 seconds
-    return () => clearInterval(interval);
-  }, [sessionId]);
-
-  const loadMessages = async () => {
+  const loadMessages = useCallback(async () => {
     try {
       const response = await api.get<SessionMessage[]>(`/sessions/${sessionId}/messages`);
       setMessages(response || []);
@@ -37,7 +31,13 @@ export function SessionMessagesPanel({ sessionId }: SessionMessagesPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadMessages();
+    const interval = setInterval(loadMessages, 10000); // Poll every 10 seconds
+    return () => clearInterval(interval);
+  }, [loadMessages]);
 
   const markAsRead = async (messageId: string) => {
     try {

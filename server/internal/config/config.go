@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
@@ -144,7 +145,14 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Environment variable overrides
+	// Try to read saved API key from file if not set in config
+	if cfg.Auth.APIKey == "" {
+		if savedKey, err := readAPIKeyFromFile(); err == nil && savedKey != "" {
+			cfg.Auth.APIKey = savedKey
+		}
+	}
+
+	// Environment variable overrides (takes precedence over saved file)
 	if v := os.Getenv("SWOOPS_API_KEY"); v != "" {
 		cfg.Auth.APIKey = v
 	}
@@ -201,9 +209,68 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("generate API key: %w", err)
 		}
 		cfg.Auth.APIKey = hex.EncodeToString(key)
-		log.Printf("No API key configured — generated ephemeral key: %s", cfg.Auth.APIKey)
-		log.Printf("Set SWOOPS_API_KEY or auth.api_key in config to persist it")
+
+		// Write API key to file instead of logging (avoid credential leakage)
+		if err := writeAPIKeyToFile(cfg.Auth.APIKey); err != nil {
+			log.Printf("Warning: failed to write API key to file: %v", err)
+			log.Printf("Generated API key - set SWOOPS_API_KEY or auth.api_key in config to persist it")
+		}
 	}
 
 	return cfg, nil
+}
+
+// readAPIKeyFromFile reads a previously saved API key from ~/.config/swoops/api_key
+func readAPIKeyFromFile() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home directory: %w", err)
+	}
+
+	keyPath := filepath.Join(homeDir, ".config", "swoops", "api_key")
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil // Not an error, just no saved key
+		}
+		return "", fmt.Errorf("read API key file: %w", err)
+	}
+
+	// Trim whitespace and newlines, validate hex format
+	apiKey := string(data)
+	// Remove leading/trailing whitespace
+	for len(apiKey) > 0 && (apiKey[0] == ' ' || apiKey[0] == '\t' || apiKey[0] == '\n' || apiKey[0] == '\r') {
+		apiKey = apiKey[1:]
+	}
+	for len(apiKey) > 0 && (apiKey[len(apiKey)-1] == ' ' || apiKey[len(apiKey)-1] == '\t' || apiKey[len(apiKey)-1] == '\n' || apiKey[len(apiKey)-1] == '\r') {
+		apiKey = apiKey[:len(apiKey)-1]
+	}
+
+	if len(apiKey) == 0 {
+		return "", fmt.Errorf("empty API key in file")
+	}
+
+	return apiKey, nil
+}
+
+// writeAPIKeyToFile writes the API key to ~/.config/swoops/api_key with secure permissions
+func writeAPIKeyToFile(apiKey string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home directory: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".config", "swoops")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	keyPath := filepath.Join(configDir, "api_key")
+	if err := os.WriteFile(keyPath, []byte(apiKey), 0600); err != nil {
+		return fmt.Errorf("write API key file: %w", err)
+	}
+
+	log.Printf("No API key configured — generated new key and saved to: %s", keyPath)
+	log.Printf("Set SWOOPS_API_KEY or auth.api_key in config to use a custom key")
+	return nil
 }

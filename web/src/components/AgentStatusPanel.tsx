@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 
 interface AgentStatusUpdate {
@@ -18,13 +18,7 @@ export function AgentStatusPanel({ sessionId }: AgentStatusPanelProps) {
   const [statusUpdates, setStatusUpdates] = useState<AgentStatusUpdate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadStatusUpdates();
-    const interval = setInterval(loadStatusUpdates, 5000); // Poll every 5 seconds
-    return () => clearInterval(interval);
-  }, [sessionId]);
-
-  const loadStatusUpdates = async () => {
+  const loadStatusUpdates = useCallback(async () => {
     try {
       const response = await api.get<AgentStatusUpdate[]>(`/sessions/${sessionId}/status`);
       setStatusUpdates(response);
@@ -33,7 +27,13 @@ export function AgentStatusPanel({ sessionId }: AgentStatusPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadStatusUpdates();
+    const interval = setInterval(loadStatusUpdates, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
+  }, [loadStatusUpdates]);
 
   const getStatusColor = (type: string) => {
     switch (type) {
