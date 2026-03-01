@@ -276,12 +276,147 @@ fi
 # Step 5: Generate certificates
 if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENABLED" = true ]; then
     echo -e "${GREEN}Step 5: Certificate Generation${NC}"
+    echo
+    echo "Choose certificate generation method:"
+    echo "  1) step-ca (Recommended for production - automated CA with renewal)"
+    echo "  2) Self-signed with OpenSSL (Simple, for testing only)"
+    echo "  3) Use existing certificates (I'll provide paths)"
+    echo
+    echo -ne "${BLUE}?${NC} Certificate method [1-3] [1]: " >&2
+    read -r CERT_METHOD </dev/tty
+    CERT_METHOD=${CERT_METHOD:-1}
 
-    if confirm "Generate self-signed certificates for testing?" "n"; then
+    if [ "$CERT_METHOD" = "1" ]; then
+        # step-ca method
+        info "Setting up certificates with step-ca..."
+
+        # Check if step CLI is installed
+        if ! command -v step &> /dev/null; then
+            warn "step CLI not found. Installing step..."
+
+            # Detect architecture
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "x86_64" ]; then
+                STEP_ARCH="amd64"
+            elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+                STEP_ARCH="arm64"
+            else
+                error "Unsupported architecture: $ARCH"
+                exit 1
+            fi
+
+            # Install step CLI
+            STEP_VERSION="0.27.5"
+            wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb" -O /tmp/step-cli.deb
+            sudo dpkg -i /tmp/step-cli.deb
+            rm /tmp/step-cli.deb
+            success "step CLI installed"
+        fi
+
+        CERT_DIR="/etc/swoops/certs"
+        sudo mkdir -p "$CERT_DIR"
+
+        # Initialize a local step CA if not already done
+        STEP_CA_DIR="/etc/swoops/step-ca"
+        if [ ! -d "$STEP_CA_DIR" ]; then
+            info "Initializing step-ca in $STEP_CA_DIR..."
+
+            # Generate a random password for the CA
+            CA_PASSWORD=$(generate_random_key)
+
+            # Initialize CA non-interactively
+            sudo STEPPATH="$STEP_CA_DIR" step ca init \
+                --name="Swoops Internal CA" \
+                --dns="localhost" \
+                --address=":9000" \
+                --provisioner="admin" \
+                --password-file=<(echo "$CA_PASSWORD") \
+                --deployment-type=standalone \
+                --acme
+
+            # Store the password securely
+            echo "$CA_PASSWORD" | sudo tee "$STEP_CA_DIR/.ca-password" > /dev/null
+            sudo chmod 600 "$STEP_CA_DIR/.ca-password"
+
+            success "step-ca initialized"
+
+            # Start step-ca as a background service
+            info "Starting step-ca server..."
+            sudo STEPPATH="$STEP_CA_DIR" step-ca "$STEP_CA_DIR/config/ca.json" \
+                --password-file="$STEP_CA_DIR/.ca-password" > /dev/null 2>&1 &
+
+            # Wait for CA to start
+            sleep 2
+            success "step-ca server started"
+        else
+            info "Using existing step-ca at $STEP_CA_DIR"
+            # Make sure it's running
+            if ! pgrep -f "step-ca" > /dev/null; then
+                info "Starting step-ca server..."
+                sudo STEPPATH="$STEP_CA_DIR" step-ca "$STEP_CA_DIR/config/ca.json" \
+                    --password-file="$STEP_CA_DIR/.ca-password" > /dev/null 2>&1 &
+                sleep 2
+            fi
+        fi
+
+        # Set STEPPATH for certificate operations
+        export STEPPATH="$STEP_CA_DIR"
+
+        # Generate gRPC server certificate
+        info "Generating gRPC server certificate..."
+        sudo step ca certificate "$DOMAIN" \
+            "$CERT_DIR/grpc-server-cert.pem" \
+            "$CERT_DIR/grpc-server-key.pem" \
+            --provisioner admin \
+            --ca-url https://localhost:9000 \
+            --root "$STEP_CA_DIR/certs/root_ca.crt" \
+            --not-after 8760h \
+            --insecure
+
+        # Generate agent client certificates if mTLS enabled
+        if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
+            info "Generating agent client certificate..."
+            sudo step ca certificate "swoops-agent" \
+                "$CERT_DIR/agent-cert.pem" \
+                "$CERT_DIR/agent-key.pem" \
+                --provisioner admin \
+                --ca-url https://localhost:9000 \
+                --root "$STEP_CA_DIR/certs/root_ca.crt" \
+                --not-after 8760h \
+                --insecure
+        fi
+
+        # Copy root CA certificate
+        sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/ca-cert.pem"
+        sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/client-ca.pem"
+        sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/server-ca.pem"
+
+        # Set proper permissions
+        sudo chown -R root:root "$CERT_DIR"
+        sudo chmod 644 "$CERT_DIR"/*.pem
+        sudo chmod 600 "$CERT_DIR"/*-key.pem
+
+        success "Certificates generated with step-ca"
+        info "CA root certificate: $CERT_DIR/ca-cert.pem"
+        info "Server certificate: $CERT_DIR/grpc-server-cert.pem"
+        if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
+            info "Agent certificate: $CERT_DIR/agent-cert.pem"
+        fi
+
+        # Update paths to use generated certificates
+        GRPC_CERT_PATH="$CERT_DIR/grpc-server-cert.pem"
+        GRPC_KEY_PATH="$CERT_DIR/grpc-server-key.pem"
+        GRPC_CLIENT_CA_PATH="$CERT_DIR/client-ca.pem"
+        AGENT_CERT_PATH="$CERT_DIR/agent-cert.pem"
+        AGENT_KEY_PATH="$CERT_DIR/agent-key.pem"
+        AGENT_CA_PATH="$CERT_DIR/server-ca.pem"
+
+    elif [ "$CERT_METHOD" = "2" ]; then
+        # Self-signed OpenSSL method (existing code)
         CERT_DIR="./certs"
         mkdir -p "$CERT_DIR"
 
-        info "Generating certificates in $CERT_DIR..."
+        info "Generating self-signed certificates in $CERT_DIR..."
 
         # Generate CA
         openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
@@ -289,7 +424,11 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             -out "$CERT_DIR/ca-cert.pem" \
             -subj "/CN=Swoops CA" 2>/dev/null
 
-        # Generate server certificate
+        # Generate server certificate with SAN
+        cat > "$CERT_DIR/server-ext.cnf" <<EOF
+subjectAltName = DNS:$DOMAIN,DNS:localhost,IP:127.0.0.1
+EOF
+
         openssl req -newkey rsa:4096 -nodes \
             -keyout "$CERT_DIR/grpc-server-key.pem" \
             -out "$CERT_DIR/grpc-server-req.pem" \
@@ -299,7 +438,8 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             -CA "$CERT_DIR/ca-cert.pem" \
             -CAkey "$CERT_DIR/ca-key.pem" \
             -CAcreateserial \
-            -out "$CERT_DIR/grpc-server-cert.pem" 2>/dev/null
+            -out "$CERT_DIR/grpc-server-cert.pem" \
+            -extfile "$CERT_DIR/server-ext.cnf" 2>/dev/null
 
         # Generate client certificate (for mTLS)
         if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
@@ -321,7 +461,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         # Copy CA as server-ca for agent
         cp "$CERT_DIR/ca-cert.pem" "$CERT_DIR/server-ca.pem"
 
-        rm -f "$CERT_DIR"/*.pem.srl "$CERT_DIR"/*-req.pem
+        rm -f "$CERT_DIR"/*.pem.srl "$CERT_DIR"/*-req.pem "$CERT_DIR/server-ext.cnf"
 
         success "Certificates generated in $CERT_DIR/"
 
