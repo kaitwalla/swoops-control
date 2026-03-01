@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -82,11 +83,43 @@ func runCommand(args []string) error {
 	tlsKey := fs.String("tls-key", "", "path to client TLS private key for mTLS")
 	serverCA := fs.String("server-ca", "", "path to server CA certificate (for TLS verification)")
 	insecure := fs.Bool("insecure", true, "use insecure connection (no TLS)")
+	httpURL := fs.String("http-url", "", "control plane HTTP URL (for downloading CA certificate)")
+	downloadCA := fs.Bool("download-ca", false, "automatically download CA certificate from server")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *hostID == "" {
 		return errors.New("--host-id is required")
+	}
+
+	// Handle CA certificate download if requested
+	if *downloadCA && !*insecure {
+		if *serverCA == "" {
+			// Default CA path
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home directory: %w", err)
+			}
+			caDir := filepath.Join(homeDir, ".config", "swoops", "certs")
+			if err := os.MkdirAll(caDir, 0755); err != nil {
+				return fmt.Errorf("create certs directory: %w", err)
+			}
+			*serverCA = filepath.Join(caDir, "server-ca.pem")
+		}
+
+		// Determine HTTP URL if not provided
+		httpURLStr := *httpURL
+		if httpURLStr == "" {
+			// Extract host:port from gRPC address and default to HTTP on port 8080
+			host := strings.Split(*serverAddr, ":")[0]
+			httpURLStr = fmt.Sprintf("http://%s:8080", host)
+		}
+
+		log.Printf("Downloading CA certificate from %s/api/v1/ca-cert", httpURLStr)
+		if err := downloadCACertificate(httpURLStr, *serverCA); err != nil {
+			return fmt.Errorf("download CA certificate: %w", err)
+		}
+		log.Printf("CA certificate downloaded to %s", *serverCA)
 	}
 
 	// Get auth token from flag or environment
@@ -620,5 +653,39 @@ func (a *agentRuntime) generateMCPConfig(sessionID, agentType, worktreePath, ser
 	}
 
 	log.Printf("generated MCP config for session %s at %s", sessionID, configPath)
+	return nil
+}
+
+// downloadCACertificate downloads the CA certificate from the control plane HTTP API
+func downloadCACertificate(baseURL, destPath string) error {
+	// Make HTTP request to download CA cert
+	url := fmt.Sprintf("%s/api/v1/ca-cert", baseURL)
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("HTTP GET %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read the certificate data
+	certData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	// Write to destination file
+	if err := os.WriteFile(destPath, certData, 0644); err != nil {
+		return fmt.Errorf("write certificate file: %w", err)
+	}
+
 	return nil
 }

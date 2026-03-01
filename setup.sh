@@ -404,13 +404,17 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         fi
 
         echo
-        warn "IMPORTANT: For remote agents, you must distribute certificates:"
-        echo "  - Copy $CERT_DIR/server-ca.pem to each agent machine"
+        warn "IMPORTANT: For remote agents, you have two options:"
+        echo "  Option 1 (Recommended): Use --download-ca flag to fetch automatically:"
+        echo "    swoops-agent run --server $GRPC_HOST:$GRPC_PORT --host-id <id> \\"
+        echo "      --download-ca --insecure=false --http-url http://$HTTP_HOST:$HTTP_PORT"
+        echo
+        echo "  Option 2: Manually copy certificates to each agent machine:"
+        echo "    scp $CERT_DIR/server-ca.pem user@agent:/etc/swoops/certs/"
         if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
-            echo "  - Copy $CERT_DIR/agent-cert.pem to each agent machine"
-            echo "  - Copy $CERT_DIR/agent-key.pem to each agent machine (keep secure!)"
+            echo "    scp $CERT_DIR/agent-cert.pem user@agent:/etc/swoops/certs/"
+            echo "    scp $CERT_DIR/agent-key.pem user@agent:/etc/swoops/certs/"
         fi
-        echo "  - Update agent config to point to these certificate paths"
         echo
 
         # Update paths to use generated certificates
@@ -928,8 +932,11 @@ fi
 if [ "$INSTALL_AGENT" = true ]; then
     if [ "$INSTALL_SERVER" != true ]; then
         echo "  1. Register this host with control plane"
-        echo "  2. Copy certificates from server to this machine:"
         if [ "$AGENT_TLS_ENABLED" = true ]; then
+            echo "  2. Option A: Let agent download CA certificate automatically:"
+            echo "     Add --download-ca --http-url http://server:8080 to agent command"
+            echo "     OR"
+            echo "     Option B: Copy certificates from server to this machine:"
             echo "     scp user@server:/etc/swoops/certs/server-ca.pem /etc/swoops/certs/"
             if [ "$AGENT_MTLS_ENABLED" = true ]; then
                 echo "     scp user@server:/etc/swoops/certs/agent-cert.pem /etc/swoops/certs/"

@@ -99,7 +99,27 @@ The setup script will:
 
 **Certificate Distribution for Remote Agents:**
 
-When using TLS/mTLS with remote agents, you need to distribute certificates from the server:
+When using TLS/mTLS with remote agents, you have two options:
+
+**Option 1 (Recommended): Automatic Download**
+
+Agents can automatically download the CA certificate from the server on first run:
+
+```bash
+# Agent will download CA cert from the control plane HTTP API
+swoops-agent run \
+  --server server.example.com:9090 \
+  --host-id my-host \
+  --download-ca \
+  --insecure=false \
+  --http-url http://server.example.com:8080
+
+# CA cert is saved to ~/.config/swoops/certs/server-ca.pem by default
+```
+
+**Option 2: Manual Distribution**
+
+Copy certificates from the server to each agent machine:
 
 ```bash
 # On each agent machine, copy the CA certificate from the server
@@ -200,7 +220,7 @@ auth:
 
 ## API
 
-All endpoints (except `/api/v1/health`) require authentication via Bearer token or `?token=` query parameter:
+All endpoints (except `/api/v1/health`, `/api/v1/version`, and `/api/v1/ca-cert`) require authentication via Bearer token or `?token=` query parameter:
 
 ```bash
 curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
@@ -209,6 +229,8 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check (unauthenticated) |
+| GET | `/api/v1/version` | Version information (unauthenticated) |
+| GET | `/api/v1/ca-cert` | Download CA certificate (unauthenticated) |
 | GET | `/api/v1/stats` | Aggregate statistics |
 | GET/POST | `/api/v1/hosts` | List / register hosts |
 | GET/PUT/DELETE | `/api/v1/hosts/{id}` | Host CRUD |
