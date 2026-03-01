@@ -14,6 +14,7 @@ import (
 	"github.com/swoopsh/swoops/pkg/agentrpc"
 	"github.com/swoopsh/swoops/pkg/models"
 	"github.com/swoopsh/swoops/server/internal/config"
+	"github.com/swoopsh/swoops/server/internal/metrics"
 	"github.com/swoopsh/swoops/server/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -116,10 +117,12 @@ func (s *Service) Close() {
 
 func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 	ctx := stream.Context()
+	metrics.AgentConnectionsTotal.Inc()
 
 	// Receive and validate hello message
 	first, err := stream.Recv()
 	if err != nil {
+		metrics.AgentConnectionErrors.WithLabelValues("recv_error").Inc()
 		if errors.Is(err, io.EOF) {
 			return status.Error(codes.InvalidArgument, "missing hello message")
 		}
@@ -131,6 +134,7 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 
 	hello := first.Hello
 	if err := validateHello(hello); err != nil {
+		metrics.AgentConnectionErrors.WithLabelValues("validation_failed").Inc()
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
@@ -138,11 +142,13 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 	host, err := s.store.GetHost(hello.HostID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			metrics.AgentConnectionErrors.WithLabelValues("host_not_found").Inc()
 			s.logger.Warn("agent connection attempt for unregistered host",
 				"host_id", hello.HostID,
 				"remote_addr", peerAddr(ctx))
 			return status.Error(codes.NotFound, "host not registered")
 		}
+		metrics.AgentConnectionErrors.WithLabelValues("db_error").Inc()
 		s.logger.Error("failed to load host",
 			"host_id", hello.HostID,
 			"error", err)
@@ -151,6 +157,7 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 
 	// Authenticate using constant-time comparison
 	if !authenticateAgent(host.AgentAuthToken, hello.AuthToken) {
+		metrics.AgentConnectionErrors.WithLabelValues("auth_failed").Inc()
 		s.logger.Warn("agent authentication failed",
 			"host_id", hello.HostID,
 			"host_name", host.Name,
@@ -175,7 +182,11 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 		"arch", hello.Arch)
 
 	conn := s.registerHostConn(hello.HostID)
-	defer s.unregisterHostConn(hello.HostID, conn)
+	metrics.AgentConnectionsActive.Inc()
+	defer func() {
+		s.unregisterHostConn(hello.HostID, conn)
+		metrics.AgentConnectionsActive.Dec()
+	}()
 
 	// Send hello acknowledgement
 	conn.sendCh <- &agentrpc.ControlEnvelope{
@@ -250,6 +261,7 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 					"error", err)
 				return status.Errorf(codes.Internal, "update heartbeat: %v", err)
 			}
+			metrics.AgentHeartbeatsReceived.Inc()
 
 		case msg.Output != nil:
 			if msg.Output.SessionID != "" {

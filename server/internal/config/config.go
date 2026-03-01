@@ -21,8 +21,11 @@ type Config struct {
 type ServerConfig struct {
 	Host           string   `yaml:"host"`
 	Port           int      `yaml:"port"`
-	ExternalURL    string   `yaml:"external_url"` // Public URL for remote agents to connect (e.g., http://swoops.example.com:8080)
+	ExternalURL    string   `yaml:"external_url"` // Public URL for remote agents to connect (e.g., https://swoops.example.com:8080)
 	AllowedOrigins []string `yaml:"allowed_origins"`
+	TLSCert        string   `yaml:"tls_cert"`  // Path to TLS certificate file for HTTPS
+	TLSKey         string   `yaml:"tls_key"`   // Path to TLS private key file for HTTPS
+	TLSEnabled     bool     `yaml:"tls_enabled"` // Enable HTTPS (production recommended)
 }
 
 type DatabaseConfig struct {
@@ -30,11 +33,13 @@ type DatabaseConfig struct {
 }
 
 type GRPCConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	TLSCert  string `yaml:"tls_cert"`  // Path to TLS certificate file
-	TLSKey   string `yaml:"tls_key"`   // Path to TLS private key file
-	Insecure bool   `yaml:"insecure"`  // Allow insecure connections (dev only)
+	Host      string `yaml:"host"`
+	Port      int    `yaml:"port"`
+	TLSCert   string `yaml:"tls_cert"`   // Path to server TLS certificate file
+	TLSKey    string `yaml:"tls_key"`    // Path to server TLS private key file
+	ClientCA  string `yaml:"client_ca"`  // Path to client CA certificate for mTLS (optional)
+	Insecure  bool   `yaml:"insecure"`   // Allow insecure connections (dev only)
+	RequireMTLS bool `yaml:"require_mtls"` // Require client certificates (mTLS)
 }
 
 type AuthConfig struct {
@@ -53,7 +58,26 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("grpc.port must be between 1 and 65535, got %d", c.GRPC.Port)
 	}
 
-	// Validate TLS configuration
+	// Validate HTTP server TLS configuration
+	if c.Server.TLSEnabled {
+		if c.Server.TLSCert == "" {
+			return fmt.Errorf("server.tls_cert is required when tls_enabled=true")
+		}
+		if c.Server.TLSKey == "" {
+			return fmt.Errorf("server.tls_key is required when tls_enabled=true")
+		}
+		// Check if files exist
+		if _, err := os.Stat(c.Server.TLSCert); err != nil {
+			return fmt.Errorf("server.tls_cert file not found: %w", err)
+		}
+		if _, err := os.Stat(c.Server.TLSKey); err != nil {
+			return fmt.Errorf("server.tls_key file not found: %w", err)
+		}
+	} else {
+		log.Printf("Warning: HTTP server is running without TLS (HTTP only). This should only be used for development.")
+	}
+
+	// Validate gRPC TLS configuration
 	if !c.GRPC.Insecure {
 		if c.GRPC.TLSCert == "" {
 			return fmt.Errorf("grpc.tls_cert is required when insecure=false")
@@ -67,6 +91,16 @@ func (c *Config) Validate() error {
 		}
 		if _, err := os.Stat(c.GRPC.TLSKey); err != nil {
 			return fmt.Errorf("grpc.tls_key file not found: %w", err)
+		}
+		// Validate mTLS configuration
+		if c.GRPC.RequireMTLS {
+			if c.GRPC.ClientCA == "" {
+				return fmt.Errorf("grpc.client_ca is required when require_mtls=true")
+			}
+			if _, err := os.Stat(c.GRPC.ClientCA); err != nil {
+				return fmt.Errorf("grpc.client_ca file not found: %w", err)
+			}
+			log.Printf("gRPC mTLS enabled: client certificates will be required and validated")
 		}
 	} else {
 		log.Printf("Warning: gRPC is running in INSECURE mode (no TLS). This should only be used for development.")
@@ -120,6 +154,15 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("SWOOPS_EXTERNAL_URL"); v != "" {
 		cfg.Server.ExternalURL = v
 	}
+	if v := os.Getenv("SWOOPS_TLS_CERT"); v != "" {
+		cfg.Server.TLSCert = v
+	}
+	if v := os.Getenv("SWOOPS_TLS_KEY"); v != "" {
+		cfg.Server.TLSKey = v
+	}
+	if v := os.Getenv("SWOOPS_TLS_ENABLED"); v != "" {
+		cfg.Server.TLSEnabled = v == "true" || v == "1"
+	}
 	if v := os.Getenv("SWOOPS_GRPC_HOST"); v != "" {
 		cfg.GRPC.Host = v
 	}
@@ -136,8 +179,14 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("SWOOPS_GRPC_TLS_KEY"); v != "" {
 		cfg.GRPC.TLSKey = v
 	}
+	if v := os.Getenv("SWOOPS_GRPC_CLIENT_CA"); v != "" {
+		cfg.GRPC.ClientCA = v
+	}
 	if v := os.Getenv("SWOOPS_GRPC_INSECURE"); v != "" {
 		cfg.GRPC.Insecure = v == "true" || v == "1"
+	}
+	if v := os.Getenv("SWOOPS_GRPC_REQUIRE_MTLS"); v != "" {
+		cfg.GRPC.RequireMTLS = v == "true" || v == "1"
 	}
 
 	// Validate configuration

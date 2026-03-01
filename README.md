@@ -4,21 +4,100 @@ Distributed AI Agent Orchestrator Control Plane.
 
 Manage multiple AI agent sessions (Claude Code, Codex) across a fleet of remote hosts from a centralized Web UI, using Git Worktrees for session isolation and Tmux for process persistence.
 
+### Architecture
+
 ```
- ┌───────────┐      HTTPS/WSS       ┌────────────────┐     gRPC (mTLS)      ┌───────────────┐
- │  Web UI   │ <──────────────────>  │ Control Plane  │ <──────────────────>  │ Swoops Agent  │
- │ (React)   │  REST + WebSocket     │ (Go: swoopsd)  │  Bidirectional       │ (per host)    │
- └───────────┘                       └────────────────┘  stream               └───────┬───────┘
-                                            │                                         │
-                                       SQLite DB                                MCP (stdio)
-                                                                                      │
-                                                                               ┌──────┴──────┐
-                                                                               │  AI Agent   │
-                                                                               │ claude/codex│
-                                                                               └─────────────┘
+Internet                     Production Deployment
+   │
+   ├─ HTTPS:443 ─────────> Reverse Proxy (Caddy/nginx)
+   │                       • Automatic Let's Encrypt
+   │                       • Auto-renewal
+   │                       │
+   │                       ├─> HTTP:8080 ────> Control Plane
+   │                       │                   (REST + WebSocket)
+   │                       │                        │
+   │                       └─> gRPC:9090 ──┐       │
+   │                                        │       │
+   └─ Agents ──────────────────────────────┘       │
+      (mTLS authenticated)                         │
+                                                    │
+                                              ┌─────┴─────┐
+                                              │           │
+                                         SQLite DB   MCP Bridge
+                                                          │
+                                                    ┌─────┴─────┐
+                                                    │ AI Agents │
+                                                    │   (tmux)  │
+                                                    └───────────┘
 ```
 
+**Key Features:**
+- **Web UI**: React-based dashboard for managing hosts and sessions
+- **Control Plane**: Go server with REST API, WebSocket streaming, and gRPC
+- **Agent**: Daemon running on each host for session management
+- **Reverse Proxy**: Caddy or nginx with automatic HTTPS (recommended for production)
+- **MCP Bridge**: AI agents can coordinate via MCP tools
+
+## Installation
+
+### Quick Install (Recommended)
+
+Install the latest release binaries:
+
+```bash
+# Install both server and agent
+curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash
+
+# Install only the server
+curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --server
+
+# Install only the agent
+curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --agent
+
+# Install specific version to custom directory
+curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --version v1.0.0 --install-dir /usr/local/bin
+```
+
+Or download the install script and run it locally:
+
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh
+chmod +x install.sh
+./install.sh --help
+```
+
+### Manual Download
+
+Download pre-built binaries from the [releases page](https://github.com/swoopsh/swoops/releases):
+
+- `swoopsd-{linux,darwin}-{amd64,arm64}` - Control plane server
+- `swoops-agent-{linux,darwin}-{amd64,arm64}` - Agent daemon
+
+### Build from Source
+
 ## Quick Start
+
+### Interactive Setup (Recommended)
+
+For production deployments, use the interactive setup script:
+
+```bash
+# Download and run the setup script
+curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/setup.sh | bash
+
+# Or clone and run locally
+./setup.sh
+```
+
+The setup script will:
+- ✅ Guide you through all configuration options
+- ✅ Generate configuration files for server/agent
+- ✅ Optionally generate self-signed certificates for testing
+- ✅ Configure reverse proxy (Caddy or nginx)
+- ✅ Install as systemd/launchd service
+- ✅ Provide next steps for starting services
+
+### Development
 
 ```bash
 # Build everything
@@ -50,6 +129,30 @@ The server starts on `http://localhost:8080`. On first run, it generates an ephe
 SWOOPS_API_KEY=your-key SWOOPS_DB_PATH=./data.db ./bin/swoopsd
 ```
 
+### Production Deployment
+
+For production deployments, see the complete guide with **automatic HTTPS via reverse proxy**:
+
+**📖 [Production Deployment Guide](PRODUCTION.md)**
+
+**Recommended:** Use Caddy or nginx as a reverse proxy for:
+- ✅ **Automatic Let's Encrypt certificates** - zero-config HTTPS
+- ✅ **Auto-renewal** - no manual intervention needed
+- ✅ **WebSocket support** - built-in upgrade handling
+- ✅ **Standard deployment pattern** - separation of concerns
+
+The guide also covers:
+- Caddy and nginx configurations with working examples
+- Docker Compose setup with automatic HTTPS
+- mTLS setup for agent connections
+- Prometheus metrics and Grafana dashboards
+- Kubernetes deployment manifests
+- Security hardening checklist
+
+**📋 [Changelog](CHANGELOG.md)** - Full release history and version notes
+
+**👨‍💻 [Developer Guide](DEVELOPER_GUIDE.md)** - Complete guide for developers and AI agents
+
 ## Configuration
 
 ```yaml
@@ -59,6 +162,9 @@ server:
   port: 8080
   allowed_origins:
     - http://localhost:5173  # Vite dev server
+  tls_enabled: false          # Enable in production
+  tls_cert: /path/to/server-cert.pem
+  tls_key: /path/to/server-key.pem
 
 database:
   path: swoops.db
@@ -66,9 +172,11 @@ database:
 grpc:
   host: 0.0.0.0
   port: 9090
-  tls_cert: /path/to/cert.pem  # Required in production (insecure=false)
-  tls_key: /path/to/key.pem    # Required in production
-  insecure: true               # Set to false in production
+  tls_cert: /path/to/grpc-cert.pem    # Required in production (insecure=false)
+  tls_key: /path/to/grpc-key.pem      # Required in production
+  client_ca: /path/to/client-ca.pem   # Required for mTLS
+  insecure: true                      # Set to false in production
+  require_mtls: false                 # Set to true for mTLS
 
 auth:
   api_key: your-persistent-api-key
@@ -146,7 +254,7 @@ swoops/
 └── go.work
 ```
 
-## Current Status — Phase 4 Complete
+## Current Status — Production Ready!
 
 ### What works now
 - **Control plane server** — single Go binary (17MB) with embedded React frontend
@@ -170,12 +278,19 @@ swoops/
 - **Host heartbeat monitoring** — automatic host status tracking (online/degraded/offline) based on agent heartbeats
 - **Live output streaming** — dual-path output (tmux polling for SSH, gRPC streaming from agents)
 - **Structured logging** — JSON logs with slog for production observability
+- **HTTPS/TLS** — Optional TLS encryption for HTTP API server
+- **Agent mTLS** — Mutual TLS authentication for agent gRPC connections with client certificates
+- **Prometheus metrics** — `/metrics` endpoint with comprehensive instrumentation
+- **Docker images** — Production-ready containerized deployment with multi-stage builds
+- **Integration tests** — End-to-end test suite validating API, gRPC, and metrics
 
 ### Security
-- All API routes (except health) require Bearer token authentication
+- All API routes (except health and metrics) require Bearer token authentication
 - WebSocket auth via `?token=` query parameter (browser WebSocket can't set headers)
+- **HTTPS/TLS** — Full TLS 1.3 support for HTTP API server with certificate validation
+- **Agent mTLS** — Mutual TLS with client certificate verification (optional but recommended)
 - **Agent authentication** — cryptographically secure tokens (256-bit) with constant-time comparison
-- **gRPC TLS support** — configurable TLS encryption for agent connections (production recommended)
+- **gRPC TLS support** — TLS 1.3 encryption for agent connections
 - **Input validation** — comprehensive validation of all gRPC inputs (host IDs, tokens, versions)
 - CORS restricted to configured origins (defaults to localhost only)
 - Internal errors are logged server-side, clients receive generic "internal server error"
@@ -184,64 +299,24 @@ swoops/
 - Delete/update operations return 404 for nonexistent resources
 - Constant-time API key comparison
 - Agent auth tokens excluded from JSON API responses
+- Non-root container execution with minimal base images
+- Read-only certificate and configuration mounts
 
-## Roadmap
+## Future Roadmap
 
-### Phase 3: Swoops Agent + gRPC ✅ COMPLETE
-**Implemented:**
-- ✅ gRPC bidirectional streaming endpoint (`AgentService/Connect`)
-- ✅ Agent authentication with 256-bit secure tokens
-- ✅ TLS support for agent connections (configurable)
-- ✅ Heartbeat tracking with host status FSM (`online`/`degraded`/`offline`)
-- ✅ Background heartbeat monitor with configurable thresholds
-- ✅ Session output ingestion via gRPC stream (dual-path: tmux + gRPC)
-- ✅ WebSocket terminal endpoint streams from both SSH tmux and gRPC agent output
-- ✅ Session lifecycle routing prefers connected agent, with automatic SSH fallback
-- ✅ Agent command execution with explicit acknowledgements and timeout handling (10s)
-- ✅ Comprehensive input validation and error handling
-- ✅ Structured logging with slog (JSON format)
-- ✅ Concurrent connection handling with proper lock ordering
-- ✅ Test suite: concurrent connections, heartbeat monitoring, command failures
-- ✅ JSON codec for gRPC (human-readable, easier debugging)
-
-**Agent capabilities:**
-- ✅ Agent daemon implementation (`swoops-agent run`)
-- ✅ Agent service installer (systemd/launchd)
-- ✅ Agent-side session management (worktree + tmux + output streaming)
-- ✅ MCP server mode (`swoops-agent mcp-serve`) for AI agent tools
-
-### Phase 4: MCP Bridge ✅ COMPLETE
-**Implemented:**
-- ✅ MCP stdio server (`swoops-agent mcp-serve`) using official Go SDK
-- ✅ Four MCP tools for AI agent coordination:
-  - `report_status` - Report agent status (working, idle, blocked, completed, error)
-  - `get_task` - Retrieve next pending task from control plane
-  - `request_review` - Request human review (code, architecture, security, performance)
-  - `coordinate_with_session` - Send messages to other AI agent sessions
-- ✅ Database schema for MCP entities (status updates, tasks, reviews, messages)
-- ✅ Control plane API endpoints for MCP operations
-- ✅ Automatic MCP config generation during session launch
-  - Claude Code: `.mcp.json` with swoops-orchestrator server
-  - Codex: `.codex/mcp.json` (compatible format)
-- ✅ Session-to-session coordination messaging system
-- ✅ Task queue and priority system for agent instructions
-- ✅ Review request workflow with status tracking
-- ✅ Agent status update history with structured details
-
-### Phase 5: Plugin System
+### Plugin System
 - Plugins as git repos with `swoops-plugin.yaml` manifest
 - Platform-aware binary resolution (linux/darwin x amd64/arm64)
 - Install/update/remove plugins across hosts
 - Agent CLI installation (Claude Code, Codex) via plugin system
 
-### Phase 6: Production Hardening
-- HTTPS/TLS for control plane (HTTP server)
-- ✅ TLS for agent gRPC connections (implemented in Phase 3)
-- mTLS for agent connections (mutual TLS authentication)
-- Prometheus metrics
-- Docker images
-- Integration tests
-- ✅ Structured logging (implemented in Phase 3)
+### Future Enhancements
+- PostgreSQL support for multi-instance deployments
+- Redis caching for session state
+- Rate limiting on API endpoints
+- SAML/OAuth authentication
+- Audit logging with retention policies
+- Multi-tenancy support
 
 ## Building
 

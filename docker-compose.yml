@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  swoopsd:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9090:9090"  # gRPC agent connections
+    environment:
+      - SWOOPS_API_KEY=dev-api-key-change-in-production
+      - SWOOPS_DB_PATH=/var/lib/swoops/swoops.db
+      - SWOOPS_GRPC_INSECURE=true  # Development only - use TLS in production
+      - SWOOPS_TLS_ENABLED=false    # Development only - enable in production
+    volumes:
+      - swoops-data:/var/lib/swoops
+    networks:
+      - swoops-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Example agent (optional - for testing)
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: agent/Dockerfile
+  #   environment:
+  #     - SWOOPS_AGENT_TOKEN=<your-agent-token>
+  #   command:
+  #     - run
+  #     - --server
+  #     - swoopsd:9090
+  #     - --host-id
+  #     - <your-host-id>
+  #     - --insecure
+  #   depends_on:
+  #     swoopsd:
+  #       condition: service_healthy
+  #   networks:
+  #     - swoops-net
+
+  # Prometheus for metrics (optional - for monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - swoops-net
+    depends_on:
+      - swoopsd
+
+  # Grafana for visualization (optional - for monitoring)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - swoops-net
+    depends_on:
+      - prometheus
+
+volumes:
+  swoops-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  swoops-net:
+    driver: bridge

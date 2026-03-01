@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install frontend dependencies
+      run: cd web && npm ci
+
+    - name: Build frontend
+      run: make build-web
+
+    - name: Build server (linux/amd64)
+      run: GOOS=linux GOARCH=amd64 go build -o bin/swoopsd-linux-amd64 ./server/cmd/swoopsd
+
+    - name: Build server (linux/arm64)
+      run: GOOS=linux GOARCH=arm64 go build -o bin/swoopsd-linux-arm64 ./server/cmd/swoopsd
+
+    - name: Build server (darwin/amd64)
+      run: GOOS=darwin GOARCH=amd64 go build -o bin/swoopsd-darwin-amd64 ./server/cmd/swoopsd
+
+    - name: Build server (darwin/arm64)
+      run: GOOS=darwin GOARCH=arm64 go build -o bin/swoopsd-darwin-arm64 ./server/cmd/swoopsd
+
+    - name: Build agent (linux/amd64)
+      run: GOOS=linux GOARCH=amd64 go build -o bin/swoops-agent-linux-amd64 ./agent/cmd/swoops-agent
+
+    - name: Build agent (linux/arm64)
+      run: GOOS=linux GOARCH=arm64 go build -o bin/swoops-agent-linux-arm64 ./agent/cmd/swoops-agent
+
+    - name: Build agent (darwin/amd64)
+      run: GOOS=darwin GOARCH=amd64 go build -o bin/swoops-agent-darwin-amd64 ./agent/cmd/swoops-agent
+
+    - name: Build agent (darwin/arm64)
+      run: GOOS=darwin GOARCH=arm64 go build -o bin/swoops-agent-darwin-arm64 ./agent/cmd/swoops-agent
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: bin/*
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          bin/swoopsd-linux-amd64
+          bin/swoopsd-linux-arm64
+          bin/swoopsd-darwin-amd64
+          bin/swoopsd-darwin-arm64
+          bin/swoops-agent-linux-amd64
+          bin/swoops-agent-linux-arm64
+          bin/swoops-agent-darwin-amd64
+          bin/swoops-agent-darwin-arm64
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

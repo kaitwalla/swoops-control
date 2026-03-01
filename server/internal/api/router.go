@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/swoopsh/swoops/server/internal/config"
 	"github.com/swoopsh/swoops/server/internal/frontend"
+	"github.com/swoopsh/swoops/server/internal/metrics"
 	"github.com/swoopsh/swoops/server/internal/sessionmgr"
 	"github.com/swoopsh/swoops/server/internal/store"
 )
@@ -58,6 +59,7 @@ func (s *Server) setupRoutes() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(metrics.HTTPMiddleware)
 
 	// CORS: use configured origins, or same-origin only (no wildcard with credentials)
 	allowedOrigins := s.config.Server.AllowedOrigins
@@ -82,6 +84,9 @@ func (s *Server) setupRoutes() {
 		WriteBufferSize: 4096,
 		CheckOrigin:     buildOriginChecker(allowedOrigins),
 	}
+
+	// Prometheus metrics endpoint (unauthenticated for scraping)
+	r.Handle("/metrics", metrics.Handler())
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Health check is unauthenticated

@@ -1,0 +1,76 @@
+# Caddy configuration for Swoops production deployment
+# Copy to /etc/caddy/Caddyfile or use with docker-compose
+#
+# Caddy automatically:
+# - Obtains Let's Encrypt certificates
+# - Renews certificates before expiration
+# - Redirects HTTP to HTTPS
+# - Handles WebSocket upgrades
+#
+# Usage:
+#   1. Replace "swoops.example.com" with your domain
+#   2. Ensure DNS points to this server
+#   3. Start Caddy: sudo systemctl restart caddy
+#   4. That's it! HTTPS is automatic.
+
+# HTTPS for Web UI and API
+swoops.example.com {
+    # Reverse proxy to Swoops HTTP API
+    # Change localhost:8080 to swoopsd:8080 for Docker Compose
+    reverse_proxy localhost:8080
+
+    # Enable WebSocket support (automatic in Caddy 2+)
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets localhost:8080
+
+    # Security headers
+    header {
+        # HSTS - Force HTTPS for 1 year
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+
+        # Clickjacking protection
+        X-Frame-Options "DENY"
+
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+
+        # Remove server header
+        -Server
+    }
+
+    # Rate limiting (optional)
+    # rate_limit {
+    #     zone dynamic_zone {
+    #         key {remote_host}
+    #         events 100
+    #         window 1m
+    #     }
+    # }
+
+    # Access logging
+    log {
+        output file /var/log/caddy/swoops-access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+        format json
+    }
+}
+
+# Note: gRPC agents connect directly to port 9090 (not through Caddy)
+# Swoops handles TLS/mTLS for gRPC connections directly
+
+# Optional: Metrics endpoint on separate subdomain
+# metrics.swoops.example.com {
+#     reverse_proxy localhost:8080
+#
+#     # Restrict to monitoring IPs
+#     @denied not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+#     respond @denied 403
+# }

@@ -1,0 +1,779 @@
+#!/bin/bash
+set -e
+
+# Swoops Interactive Setup Script
+# This script guides you through configuring Swoops for production deployment
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper functions
+info() {
+    echo -e "${BLUE}ℹ ${NC}$1"
+}
+
+success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+prompt() {
+    local varname=$1
+    local prompt_text=$2
+    local default=$3
+
+    if [ -n "$default" ]; then
+        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [$default]: ")" value
+        eval "$varname=\"${value:-$default}\""
+    else
+        read -p "$(echo -e "${BLUE}?${NC} $prompt_text: ")" value
+        eval "$varname=\"$value\""
+    fi
+}
+
+prompt_password() {
+    local varname=$1
+    local prompt_text=$2
+
+    read -s -p "$(echo -e "${BLUE}?${NC} $prompt_text: ")" value
+    echo
+    eval "$varname=\"$value\""
+}
+
+confirm() {
+    local prompt_text=$1
+    local default=${2:-n}
+
+    if [ "$default" = "y" ]; then
+        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [Y/n]: ")" response
+        response=${response:-y}
+    else
+        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [y/N]: ")" response
+        response=${response:-n}
+    fi
+
+    [[ "$response" =~ ^[Yy]$ ]]
+}
+
+generate_random_key() {
+    openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 32
+}
+
+# Banner
+echo -e "${GREEN}"
+cat << "EOF"
+   ____
+  / _____|_      _____   ___  _ __  ___
+  \___ \ \ \ /\ / / _ \ / _ \| '_ \/ __|
+   ___) | \ V  V / (_) | (_) | |_) \__ \
+  |____/   \_/\_/ \___/ \___/| .__/|___/
+                              |_|
+  Interactive Setup Script
+EOF
+echo -e "${NC}"
+
+info "This script will help you configure Swoops for production deployment."
+echo
+
+# Detect OS
+OS="unknown"
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    OS="linux"
+    if command -v systemctl &> /dev/null; then
+        INIT_SYSTEM="systemd"
+    else
+        INIT_SYSTEM="other"
+    fi
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="macos"
+    INIT_SYSTEM="launchd"
+fi
+
+info "Detected OS: $OS ($INIT_SYSTEM)"
+echo
+
+# Step 1: Choose what to install
+echo -e "${GREEN}Step 1: Choose Components${NC}"
+echo "  1) Control Plane (server)"
+echo "  2) Agent"
+echo "  3) Both (server + agent on same machine)"
+prompt INSTALL_TYPE "What would you like to install? [1-3]" "1"
+
+INSTALL_SERVER=false
+INSTALL_AGENT=false
+
+case $INSTALL_TYPE in
+    1) INSTALL_SERVER=true ;;
+    2) INSTALL_AGENT=true ;;
+    3) INSTALL_SERVER=true; INSTALL_AGENT=true ;;
+    *) error "Invalid choice"; exit 1 ;;
+esac
+echo
+
+# Step 2: Deployment type (if installing server)
+if [ "$INSTALL_SERVER" = true ]; then
+    echo -e "${GREEN}Step 2: Deployment Type${NC}"
+    echo "  1) Production with reverse proxy (Caddy/nginx) - Recommended"
+    echo "  2) Direct deployment with manual TLS"
+    echo "  3) Development (HTTP only, no TLS)"
+    prompt DEPLOY_TYPE "Deployment type [1-3]" "1"
+    echo
+
+    case $DEPLOY_TYPE in
+        1)
+            USE_REVERSE_PROXY=true
+            USE_TLS=false  # Reverse proxy handles TLS
+            ;;
+        2)
+            USE_REVERSE_PROXY=false
+            USE_TLS=true
+            ;;
+        3)
+            USE_REVERSE_PROXY=false
+            USE_TLS=false
+            warn "Development mode - not suitable for production!"
+            ;;
+        *) error "Invalid choice"; exit 1 ;;
+    esac
+fi
+
+# Step 3: Server configuration
+if [ "$INSTALL_SERVER" = true ]; then
+    echo -e "${GREEN}Step 3: Server Configuration${NC}"
+
+    prompt DOMAIN "Domain name" "swoops.example.com"
+
+    if [ "$USE_REVERSE_PROXY" = true ]; then
+        prompt HTTP_HOST "HTTP server bind address (internal)" "127.0.0.1"
+        prompt HTTP_PORT "HTTP server port (internal)" "8080"
+        EXTERNAL_URL="https://$DOMAIN"
+    else
+        prompt HTTP_HOST "HTTP server bind address" "0.0.0.0"
+        if [ "$USE_TLS" = true ]; then
+            prompt HTTP_PORT "HTTPS server port" "443"
+            EXTERNAL_URL="https://$DOMAIN:$HTTP_PORT"
+        else
+            prompt HTTP_PORT "HTTP server port" "8080"
+            EXTERNAL_URL="http://$DOMAIN:$HTTP_PORT"
+        fi
+    fi
+
+    prompt GRPC_HOST "gRPC server bind address" "0.0.0.0"
+    prompt GRPC_PORT "gRPC server port" "9090"
+
+    prompt DB_PATH "Database path" "/var/lib/swoops/swoops.db"
+
+    # API Key
+    if confirm "Generate random API key?" "y"; then
+        API_KEY=$(generate_random_key)
+        success "Generated API key: $API_KEY"
+    else
+        prompt_password API_KEY "Enter API key (32+ characters recommended)"
+    fi
+
+    # gRPC TLS
+    echo
+    if confirm "Enable TLS for gRPC connections?" "y"; then
+        GRPC_TLS_ENABLED=true
+
+        if confirm "Enable mTLS (client certificate authentication)?" "y"; then
+            GRPC_MTLS_ENABLED=true
+        else
+            GRPC_MTLS_ENABLED=false
+        fi
+
+        # Certificate paths
+        prompt GRPC_CERT_PATH "gRPC server certificate path" "/etc/swoops/certs/grpc-server-cert.pem"
+        prompt GRPC_KEY_PATH "gRPC server key path" "/etc/swoops/certs/grpc-server-key.pem"
+
+        if [ "$GRPC_MTLS_ENABLED" = true ]; then
+            prompt GRPC_CLIENT_CA_PATH "Client CA certificate path" "/etc/swoops/certs/client-ca.pem"
+        fi
+    else
+        GRPC_TLS_ENABLED=false
+        GRPC_MTLS_ENABLED=false
+        warn "gRPC will run without TLS - only use for development!"
+    fi
+
+    # HTTP TLS (direct deployment only)
+    if [ "$USE_TLS" = true ]; then
+        echo
+        prompt HTTP_CERT_PATH "HTTP server certificate path" "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+        prompt HTTP_KEY_PATH "HTTP server key path" "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+    fi
+
+    echo
+fi
+
+# Step 4: Agent configuration
+if [ "$INSTALL_AGENT" = true ]; then
+    echo -e "${GREEN}Step 4: Agent Configuration${NC}"
+
+    if [ "$INSTALL_SERVER" = true ]; then
+        # Installing on same machine as server
+        CONTROL_PLANE_HOST="127.0.0.1"
+        CONTROL_PLANE_PORT="$GRPC_PORT"
+    else
+        prompt CONTROL_PLANE_HOST "Control plane hostname/IP"
+        prompt CONTROL_PLANE_PORT "Control plane gRPC port" "9090"
+    fi
+
+    prompt HOST_ID "Host ID (unique identifier for this machine)" "$(hostname)"
+
+    if [ "$INSTALL_SERVER" != true ]; then
+        # Need to get auth token from user
+        warn "You'll need to register this host with the control plane first."
+        echo "After registration, you'll receive an auth token."
+        prompt_password AGENT_AUTH_TOKEN "Agent authentication token"
+    else
+        # Will be generated by server
+        AGENT_AUTH_TOKEN="<will-be-generated>"
+    fi
+
+    # Agent TLS configuration
+    echo
+    if confirm "Use TLS for agent connection?" "y"; then
+        AGENT_TLS_ENABLED=true
+
+        if confirm "Use client certificate (mTLS)?" "y"; then
+            AGENT_MTLS_ENABLED=true
+            prompt AGENT_CERT_PATH "Agent client certificate path" "/etc/swoops/certs/agent-cert.pem"
+            prompt AGENT_KEY_PATH "Agent client key path" "/etc/swoops/certs/agent-key.pem"
+        else
+            AGENT_MTLS_ENABLED=false
+        fi
+
+        prompt AGENT_CA_PATH "Server CA certificate path" "/etc/swoops/certs/server-ca.pem"
+    else
+        AGENT_TLS_ENABLED=false
+        AGENT_MTLS_ENABLED=false
+        warn "Agent will connect without TLS - only use for development!"
+    fi
+
+    echo
+fi
+
+# Step 5: Generate certificates
+if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENABLED" = true ]; then
+    echo -e "${GREEN}Step 5: Certificate Generation${NC}"
+
+    if confirm "Generate self-signed certificates for testing?" "n"; then
+        CERT_DIR="./certs"
+        mkdir -p "$CERT_DIR"
+
+        info "Generating certificates in $CERT_DIR..."
+
+        # Generate CA
+        openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
+            -keyout "$CERT_DIR/ca-key.pem" \
+            -out "$CERT_DIR/ca-cert.pem" \
+            -subj "/CN=Swoops CA" 2>/dev/null
+
+        # Generate server certificate
+        openssl req -newkey rsa:4096 -nodes \
+            -keyout "$CERT_DIR/grpc-server-key.pem" \
+            -out "$CERT_DIR/grpc-server-req.pem" \
+            -subj "/CN=$DOMAIN" 2>/dev/null
+
+        openssl x509 -req -in "$CERT_DIR/grpc-server-req.pem" -days 365 \
+            -CA "$CERT_DIR/ca-cert.pem" \
+            -CAkey "$CERT_DIR/ca-key.pem" \
+            -CAcreateserial \
+            -out "$CERT_DIR/grpc-server-cert.pem" 2>/dev/null
+
+        # Generate client certificate (for mTLS)
+        if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
+            openssl req -newkey rsa:4096 -nodes \
+                -keyout "$CERT_DIR/agent-key.pem" \
+                -out "$CERT_DIR/agent-req.pem" \
+                -subj "/CN=swoops-agent" 2>/dev/null
+
+            openssl x509 -req -in "$CERT_DIR/agent-req.pem" -days 365 \
+                -CA "$CERT_DIR/ca-cert.pem" \
+                -CAkey "$CERT_DIR/ca-key.pem" \
+                -CAcreateserial \
+                -out "$CERT_DIR/agent-cert.pem" 2>/dev/null
+        fi
+
+        # Copy CA as client-ca for server
+        cp "$CERT_DIR/ca-cert.pem" "$CERT_DIR/client-ca.pem"
+
+        # Copy CA as server-ca for agent
+        cp "$CERT_DIR/ca-cert.pem" "$CERT_DIR/server-ca.pem"
+
+        rm -f "$CERT_DIR"/*.pem.srl "$CERT_DIR"/*-req.pem
+
+        success "Certificates generated in $CERT_DIR/"
+
+        # Update paths to use generated certificates
+        GRPC_CERT_PATH="$CERT_DIR/grpc-server-cert.pem"
+        GRPC_KEY_PATH="$CERT_DIR/grpc-server-key.pem"
+        GRPC_CLIENT_CA_PATH="$CERT_DIR/client-ca.pem"
+        AGENT_CERT_PATH="$CERT_DIR/agent-cert.pem"
+        AGENT_KEY_PATH="$CERT_DIR/agent-key.pem"
+        AGENT_CA_PATH="$CERT_DIR/server-ca.pem"
+
+        echo
+    else
+        info "You'll need to provide valid certificates before starting."
+        if [ "$USE_REVERSE_PROXY" = true ]; then
+            info "For HTTP: Caddy/nginx will handle certificates automatically."
+        elif [ "$USE_TLS" = true ]; then
+            info "For HTTP: Use certbot to obtain Let's Encrypt certificates."
+        fi
+        info "For gRPC: Generate or obtain certificates for mTLS."
+        echo
+    fi
+fi
+
+# Step 6: Write configuration files
+echo -e "${GREEN}Step 6: Writing Configuration${NC}"
+
+CONFIG_DIR="."
+if confirm "Create config in /etc/swoops?" "n"; then
+    CONFIG_DIR="/etc/swoops"
+    sudo mkdir -p "$CONFIG_DIR"
+else
+    prompt CONFIG_DIR "Configuration directory" "."
+    mkdir -p "$CONFIG_DIR"
+fi
+
+# Server config
+if [ "$INSTALL_SERVER" = true ]; then
+    SERVER_CONFIG="$CONFIG_DIR/swoopsd.yaml"
+
+    cat > "$SERVER_CONFIG" <<EOF
+# Swoops Control Plane Configuration
+# Generated by setup.sh on $(date)
+
+server:
+  host: $HTTP_HOST
+  port: $HTTP_PORT
+  external_url: $EXTERNAL_URL
+  allowed_origins:
+    - $EXTERNAL_URL
+EOF
+
+    if [ "$USE_TLS" = true ]; then
+        cat >> "$SERVER_CONFIG" <<EOF
+  tls_enabled: true
+  tls_cert: $HTTP_CERT_PATH
+  tls_key: $HTTP_KEY_PATH
+EOF
+    else
+        cat >> "$SERVER_CONFIG" <<EOF
+  tls_enabled: false
+EOF
+    fi
+
+    cat >> "$SERVER_CONFIG" <<EOF
+
+database:
+  path: $DB_PATH
+
+grpc:
+  host: $GRPC_HOST
+  port: $GRPC_PORT
+EOF
+
+    if [ "$GRPC_TLS_ENABLED" = true ]; then
+        cat >> "$SERVER_CONFIG" <<EOF
+  insecure: false
+  tls_cert: $GRPC_CERT_PATH
+  tls_key: $GRPC_KEY_PATH
+EOF
+        if [ "$GRPC_MTLS_ENABLED" = true ]; then
+            cat >> "$SERVER_CONFIG" <<EOF
+  require_mtls: true
+  client_ca: $GRPC_CLIENT_CA_PATH
+EOF
+        else
+            cat >> "$SERVER_CONFIG" <<EOF
+  require_mtls: false
+EOF
+        fi
+    else
+        cat >> "$SERVER_CONFIG" <<EOF
+  insecure: true
+  require_mtls: false
+EOF
+    fi
+
+    cat >> "$SERVER_CONFIG" <<EOF
+
+auth:
+  api_key: $API_KEY
+EOF
+
+    success "Server configuration written to: $SERVER_CONFIG"
+
+    # Create environment file for systemd
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        ENV_FILE="$CONFIG_DIR/swoopsd.env"
+        cat > "$ENV_FILE" <<EOF
+# Swoops environment variables
+SWOOPS_API_KEY=$API_KEY
+SWOOPS_DB_PATH=$DB_PATH
+EOF
+        chmod 600 "$ENV_FILE"
+        success "Environment file written to: $ENV_FILE"
+    fi
+fi
+
+# Agent config (write to shell script for service installation)
+if [ "$INSTALL_AGENT" = true ]; then
+    AGENT_CONFIG="$CONFIG_DIR/agent.env"
+
+    cat > "$AGENT_CONFIG" <<EOF
+# Swoops Agent Configuration
+# Generated by setup.sh on $(date)
+
+# Connection settings
+SWOOPS_SERVER=$CONTROL_PLANE_HOST:$CONTROL_PLANE_PORT
+SWOOPS_HOST_ID=$HOST_ID
+SWOOPS_AUTH_TOKEN=$AGENT_AUTH_TOKEN
+EOF
+
+    if [ "$AGENT_TLS_ENABLED" = true ]; then
+        cat >> "$AGENT_CONFIG" <<EOF
+
+# TLS settings
+SWOOPS_INSECURE=false
+SWOOPS_SERVER_CA=$AGENT_CA_PATH
+EOF
+        if [ "$AGENT_MTLS_ENABLED" = true ]; then
+            cat >> "$AGENT_CONFIG" <<EOF
+SWOOPS_CLIENT_CERT=$AGENT_CERT_PATH
+SWOOPS_CLIENT_KEY=$AGENT_KEY_PATH
+EOF
+        fi
+    else
+        cat >> "$AGENT_CONFIG" <<EOF
+
+# TLS disabled (development only!)
+SWOOPS_INSECURE=true
+EOF
+    fi
+
+    chmod 600 "$AGENT_CONFIG"
+    success "Agent configuration written to: $AGENT_CONFIG"
+fi
+
+echo
+
+# Step 7: Reverse proxy configuration
+if [ "$INSTALL_SERVER" = true ] && [ "$USE_REVERSE_PROXY" = true ]; then
+    echo -e "${GREEN}Step 7: Reverse Proxy Configuration${NC}"
+
+    echo "Choose reverse proxy:"
+    echo "  1) Caddy (automatic HTTPS)"
+    echo "  2) nginx (with certbot)"
+    echo "  3) Skip (I'll configure it manually)"
+    prompt PROXY_TYPE "Reverse proxy type [1-3]" "1"
+
+    case $PROXY_TYPE in
+        1)
+            CADDY_CONFIG="$CONFIG_DIR/Caddyfile"
+            cat > "$CADDY_CONFIG" <<EOF
+# Caddy configuration for Swoops
+$DOMAIN {
+    reverse_proxy $HTTP_HOST:$HTTP_PORT
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+EOF
+            success "Caddy configuration written to: $CADDY_CONFIG"
+            info "To use: sudo caddy run --config $CADDY_CONFIG"
+            ;;
+        2)
+            NGINX_CONFIG="$CONFIG_DIR/nginx-swoops.conf"
+            cat > "$NGINX_CONFIG" <<EOF
+# nginx configuration for Swoops
+# Copy to /etc/nginx/sites-available/swoops
+# Then: sudo ln -s /etc/nginx/sites-available/swoops /etc/nginx/sites-enabled/
+
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$server_name\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name $DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+
+    location / {
+        proxy_pass http://$HTTP_HOST:$HTTP_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket support
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+            success "nginx configuration written to: $NGINX_CONFIG"
+            info "Copy to /etc/nginx/sites-available/ and run certbot --nginx"
+            ;;
+        3)
+            info "Skipping reverse proxy configuration."
+            info "See Caddyfile.example or nginx.conf.example for reference."
+            ;;
+    esac
+    echo
+fi
+
+# Step 8: Service installation
+echo -e "${GREEN}Step 8: Service Installation${NC}"
+
+if confirm "Install as system service?" "y"; then
+    if [ "$INSTALL_SERVER" = true ]; then
+        if [ "$INIT_SYSTEM" = "systemd" ]; then
+            SERVICE_FILE="/etc/systemd/system/swoopsd.service"
+
+            sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=Swoops Control Plane
+After=network.target
+
+[Service]
+Type=simple
+User=swoops
+Group=swoops
+WorkingDirectory=/opt/swoops
+EnvironmentFile=$CONFIG_DIR/swoopsd.env
+ExecStart=$(which swoopsd || echo '/usr/local/bin/swoopsd') --config $SERVER_CONFIG
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+            success "Systemd service created: $SERVICE_FILE"
+
+            # Create user
+            if ! id swoops &>/dev/null; then
+                sudo useradd -r -s /bin/false swoops || true
+            fi
+
+            # Create directories
+            sudo mkdir -p /opt/swoops "$(dirname "$DB_PATH")"
+            sudo chown -R swoops:swoops /opt/swoops "$(dirname "$DB_PATH")"
+
+            sudo systemctl daemon-reload
+            info "To start: sudo systemctl start swoopsd"
+            info "To enable on boot: sudo systemctl enable swoopsd"
+
+        elif [ "$INIT_SYSTEM" = "launchd" ]; then
+            PLIST_FILE="$HOME/Library/LaunchAgents/com.swoops.server.plist"
+
+            cat > "$PLIST_FILE" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swoops.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(which swoopsd || echo '/usr/local/bin/swoopsd')</string>
+        <string>--config</string>
+        <string>$SERVER_CONFIG</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SWOOPS_API_KEY</key>
+        <string>$API_KEY</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/swoops-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/swoops-server.error.log</string>
+</dict>
+</plist>
+EOF
+
+            success "Launchd plist created: $PLIST_FILE"
+            info "To start: launchctl load $PLIST_FILE"
+        fi
+    fi
+
+    if [ "$INSTALL_AGENT" = true ]; then
+        if [ "$INIT_SYSTEM" = "systemd" ]; then
+            SERVICE_FILE="/etc/systemd/system/swoops-agent.service"
+
+            sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=Swoops Agent
+After=network.target
+
+[Service]
+Type=simple
+User=swoops
+Group=swoops
+WorkingDirectory=/opt/swoops
+EnvironmentFile=$AGENT_CONFIG
+ExecStart=$(which swoops-agent || echo '/usr/local/bin/swoops-agent') run --server \$SWOOPS_SERVER --host-id \$SWOOPS_HOST_ID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+            success "Systemd service created: $SERVICE_FILE"
+
+            sudo systemctl daemon-reload
+            info "To start: sudo systemctl start swoops-agent"
+            info "To enable on boot: sudo systemctl enable swoops-agent"
+
+        elif [ "$INIT_SYSTEM" = "launchd" ]; then
+            PLIST_FILE="$HOME/Library/LaunchAgents/com.swoops.agent.plist"
+
+            # Source environment variables for plist
+            source "$AGENT_CONFIG"
+
+            cat > "$PLIST_FILE" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swoops.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
+        <string>run</string>
+        <string>--server</string>
+        <string>$SWOOPS_SERVER</string>
+        <string>--host-id</string>
+        <string>$SWOOPS_HOST_ID</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SWOOPS_AUTH_TOKEN</key>
+        <string>$SWOOPS_AUTH_TOKEN</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/swoops-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/swoops-agent.error.log</string>
+</dict>
+</plist>
+EOF
+
+            success "Launchd plist created: $PLIST_FILE"
+            info "To start: launchctl load $PLIST_FILE"
+        fi
+    fi
+fi
+
+echo
+
+# Summary
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}Setup Complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo
+
+if [ "$INSTALL_SERVER" = true ]; then
+    echo -e "${BLUE}Server Configuration:${NC}"
+    echo "  Config file: $SERVER_CONFIG"
+    echo "  External URL: $EXTERNAL_URL"
+    echo "  API Key: $API_KEY"
+    echo "  Database: $DB_PATH"
+    if [ "$USE_REVERSE_PROXY" = true ]; then
+        echo "  Reverse Proxy: Yes (configure $PROXY_TYPE)"
+    fi
+    if [ "$GRPC_TLS_ENABLED" = true ]; then
+        echo "  gRPC TLS: Yes (mTLS: $GRPC_MTLS_ENABLED)"
+    fi
+    echo
+fi
+
+if [ "$INSTALL_AGENT" = true ]; then
+    echo -e "${BLUE}Agent Configuration:${NC}"
+    echo "  Config file: $AGENT_CONFIG"
+    echo "  Control Plane: $CONTROL_PLANE_HOST:$CONTROL_PLANE_PORT"
+    echo "  Host ID: $HOST_ID"
+    if [ "$AGENT_TLS_ENABLED" = true ]; then
+        echo "  TLS: Yes (mTLS: $AGENT_MTLS_ENABLED)"
+    fi
+    echo
+fi
+
+echo -e "${BLUE}Next Steps:${NC}"
+if [ "$INSTALL_SERVER" = true ]; then
+    echo "  1. Review configuration: cat $SERVER_CONFIG"
+    if [ "$USE_REVERSE_PROXY" = true ]; then
+        if [ "$PROXY_TYPE" = "1" ]; then
+            echo "  2. Start Caddy: sudo caddy run --config $CONFIG_DIR/Caddyfile"
+        elif [ "$PROXY_TYPE" = "2" ]; then
+            echo "  2. Configure nginx and run certbot"
+        fi
+    fi
+    echo "  3. Start server: sudo systemctl start swoopsd"
+    echo "  4. Check logs: sudo journalctl -u swoopsd -f"
+    echo "  5. Access UI: $EXTERNAL_URL"
+    echo "  6. Register hosts via API or Web UI"
+fi
+
+if [ "$INSTALL_AGENT" = true ]; then
+    if [ "$INSTALL_SERVER" != true ]; then
+        echo "  1. Register this host with control plane"
+        echo "  2. Update $AGENT_CONFIG with auth token"
+    fi
+    echo "  3. Start agent: sudo systemctl start swoops-agent"
+    echo "  4. Check logs: sudo journalctl -u swoops-agent -f"
+fi
+
+echo
+success "Setup complete! Happy orchestrating! 🚀"
