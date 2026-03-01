@@ -191,6 +191,42 @@ func (s *Store) UpdateSessionStatus(id string, status models.SessionStatus) erro
 	return checkRowsAffected(res)
 }
 
+// UpdateSession updates all mutable fields of a session.
+func (s *Store) UpdateSession(sess *models.Session) error {
+	envJSON, _ := json.Marshal(sess.EnvVars)
+	mcpJSON, _ := json.Marshal(sess.MCPServers)
+	pluginsJSON, _ := json.Marshal(sess.Plugins)
+	toolsJSON, _ := json.Marshal(sess.AllowedTools)
+	flagsJSON, _ := json.Marshal(sess.ExtraFlags)
+	sess.UpdatedAt = time.Now()
+
+	res, err := s.db.Exec(`
+		UPDATE sessions SET name=?, status=?, worktree_path=?, tmux_session=?, agent_pid=?,
+		model_override=?, env_vars_json=?, mcp_servers_json=?, plugins_json=?,
+		allowed_tools_json=?, extra_flags_json=?, last_output=?,
+		started_at=?, stopped_at=?, updated_at=?
+		WHERE id=?`,
+		sess.Name, sess.Status, sess.WorktreePath, sess.TmuxSessionName, sess.AgentPID,
+		sess.ModelOverride, string(envJSON), string(mcpJSON), string(pluginsJSON),
+		string(toolsJSON), string(flagsJSON), sess.LastOutput,
+		sess.StartedAt, sess.StoppedAt, sess.UpdatedAt, sess.ID,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
+// UpdateSessionOutput updates only the last_output field.
+func (s *Store) UpdateSessionOutput(id, output string) error {
+	now := time.Now()
+	res, err := s.db.Exec(`UPDATE sessions SET last_output=?, updated_at=? WHERE id=?`, output, now, id)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
 func (s *Store) DeleteSession(id string) error {
 	res, err := s.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
 	if err != nil {

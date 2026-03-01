@@ -33,7 +33,12 @@ func testServer(t *testing.T) *Server {
 	cfg := config.DefaultConfig()
 	cfg.Auth.APIKey = testAPIKey
 
-	return NewServer(s, cfg)
+	srv := NewServer(s, cfg)
+
+	// Stub out the async launcher so tests never attempt SSH
+	srv.launchFunc = func(sessionID, hostID string) error { return nil }
+
+	return srv
 }
 
 func doRequest(srv *Server, method, path string, body interface{}, apiKey string) *httptest.ResponseRecorder {
@@ -143,6 +148,199 @@ func TestCreateHostValidation(t *testing.T) {
 	w := doRequest(srv, "POST", "/api/v1/hosts", body, testAPIKey)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("create host missing fields got %d, want 400", w.Code)
+	}
+}
+
+func TestSessionCRUDEndpoints(t *testing.T) {
+	srv := testServer(t)
+
+	// Create host first
+	hostBody := map[string]interface{}{
+		"name": "sess-host", "hostname": "10.0.0.1",
+		"ssh_user": "deploy", "ssh_key_path": "/tmp/key",
+	}
+	w := doRequest(srv, "POST", "/api/v1/hosts", hostBody, testAPIKey)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create host got %d", w.Code)
+	}
+	var host models.Host
+	json.NewDecoder(w.Body).Decode(&host)
+
+	// Create session — response must always be "pending" (race-free snapshot)
+	sessBody := map[string]interface{}{
+		"host_id":    host.ID,
+		"agent_type": "claude",
+		"prompt":     "fix the bug in auth.go",
+	}
+	w = doRequest(srv, "POST", "/api/v1/sessions", sessBody, testAPIKey)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session got %d: %s", w.Code, w.Body.String())
+	}
+	var sess models.Session
+	json.NewDecoder(w.Body).Decode(&sess)
+	if sess.AgentType != "claude" {
+		t.Errorf("session agent_type %q, want claude", sess.AgentType)
+	}
+	if sess.Status != "pending" {
+		t.Errorf("session status %q, want pending", sess.Status)
+	}
+	if sess.BranchName == "" {
+		t.Error("session branch_name should be auto-generated")
+	}
+
+	// Get session
+	w = doRequest(srv, "GET", "/api/v1/sessions/"+sess.ID, nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("get session got %d", w.Code)
+	}
+
+	// List sessions
+	w = doRequest(srv, "GET", "/api/v1/sessions", nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list sessions got %d", w.Code)
+	}
+	var sessions []models.Session
+	json.NewDecoder(w.Body).Decode(&sessions)
+	if len(sessions) != 1 {
+		t.Errorf("got %d sessions, want 1", len(sessions))
+	}
+
+	// List sessions by host
+	w = doRequest(srv, "GET", "/api/v1/hosts/"+host.ID+"/sessions", nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list host sessions got %d", w.Code)
+	}
+
+	// Get output — session is pending with no tmux, returns stored (empty) output
+	w = doRequest(srv, "GET", "/api/v1/sessions/"+sess.ID+"/output", nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("get output got %d", w.Code)
+	}
+
+	// Send input — session is pending, has no tmux_session, expect 500 (no tmux)
+	inputBody := map[string]interface{}{"input": "test input"}
+	w = doRequest(srv, "POST", "/api/v1/sessions/"+sess.ID+"/input", inputBody, testAPIKey)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("send input to pending session got %d, want 500", w.Code)
+	}
+
+	// Stop session — updates status to stopped via store (no SSH needed)
+	w = doRequest(srv, "POST", "/api/v1/sessions/"+sess.ID+"/stop", nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("stop session got %d, want 200", w.Code)
+	}
+
+	// Verify stopped
+	w = doRequest(srv, "GET", "/api/v1/sessions/"+sess.ID, nil, testAPIKey)
+	var stopped models.Session
+	json.NewDecoder(w.Body).Decode(&stopped)
+	if stopped.Status != "stopped" {
+		t.Errorf("session status after stop %q, want stopped", stopped.Status)
+	}
+
+	// Stop again — already stopped, should return current status
+	w = doRequest(srv, "POST", "/api/v1/sessions/"+sess.ID+"/stop", nil, testAPIKey)
+	if w.Code != http.StatusOK {
+		t.Errorf("stop already-stopped session got %d, want 200", w.Code)
+	}
+
+	// Get nonexistent session
+	w = doRequest(srv, "GET", "/api/v1/sessions/nonexistent", nil, testAPIKey)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("get nonexistent session got %d, want 404", w.Code)
+	}
+
+	// Delete session
+	w = doRequest(srv, "DELETE", "/api/v1/sessions/"+sess.ID, nil, testAPIKey)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("delete session got %d, want 204", w.Code)
+	}
+}
+
+func TestCreateSessionReturnsStableSnapshot(t *testing.T) {
+	srv := testServer(t)
+
+	// Create host
+	hostBody := map[string]interface{}{
+		"name": "snap-host", "hostname": "10.0.0.2",
+		"ssh_user": "deploy", "ssh_key_path": "/tmp/key",
+	}
+	w := doRequest(srv, "POST", "/api/v1/hosts", hostBody, testAPIKey)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create host got %d", w.Code)
+	}
+	var host models.Host
+	json.NewDecoder(w.Body).Decode(&host)
+
+	// Create session
+	sessBody := map[string]interface{}{
+		"host_id":    host.ID,
+		"agent_type": "codex",
+		"prompt":     "refactor utils",
+	}
+	w = doRequest(srv, "POST", "/api/v1/sessions", sessBody, testAPIKey)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session got %d", w.Code)
+	}
+	var sess models.Session
+	json.NewDecoder(w.Body).Decode(&sess)
+
+	// The response must be a clean "pending" snapshot, never reflecting
+	// any mutations from the async launcher goroutine.
+	if sess.Status != "pending" {
+		t.Errorf("create response status %q, want pending (race-free snapshot)", sess.Status)
+	}
+	if sess.WorktreePath != "" {
+		t.Errorf("create response worktree_path %q, want empty (not yet launched)", sess.WorktreePath)
+	}
+	if sess.TmuxSessionName != "" {
+		t.Errorf("create response tmux_session %q, want empty (not yet launched)", sess.TmuxSessionName)
+	}
+}
+
+func TestCreateSessionValidation(t *testing.T) {
+	srv := testServer(t)
+
+	// Missing required fields
+	w := doRequest(srv, "POST", "/api/v1/sessions", map[string]interface{}{}, testAPIKey)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("create session with no fields got %d, want 400", w.Code)
+	}
+
+	// Invalid agent type
+	w = doRequest(srv, "POST", "/api/v1/sessions", map[string]interface{}{
+		"host_id": "x", "agent_type": "invalid", "prompt": "test",
+	}, testAPIKey)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("create session with invalid agent_type got %d, want 400", w.Code)
+	}
+
+	// Non-existent host
+	w = doRequest(srv, "POST", "/api/v1/sessions", map[string]interface{}{
+		"host_id": "nonexistent", "agent_type": "claude", "prompt": "test",
+	}, testAPIKey)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("create session with nonexistent host got %d, want 400", w.Code)
+	}
+}
+
+func TestTokenQueryParamAuth(t *testing.T) {
+	srv := testServer(t)
+
+	// Auth via query param
+	req := httptest.NewRequest("GET", "/api/v1/stats?token="+testAPIKey, nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("auth via query param got %d, want 200", w.Code)
+	}
+
+	// Wrong token via query param
+	req = httptest.NewRequest("GET", "/api/v1/stats?token=wrong-key", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("auth via wrong query param got %d, want 403", w.Code)
 	}
 }
 

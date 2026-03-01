@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { sessionsApi } from '../api/sessions';
 import { hostsApi } from '../api/hosts';
 import { StatusBadge } from '../components/StatusBadge';
+import { TerminalOutput } from '../components/TerminalOutput';
 import type { Session } from '../types/session';
 import type { Host } from '../types/host';
-import { ArrowLeft, Square, Send } from 'lucide-react';
+import { ArrowLeft, Square, Send, RefreshCw } from 'lucide-react';
 
 export function SessionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -14,7 +15,7 @@ export function SessionDetail() {
   const [error, setError] = useState('');
   const [inputText, setInputText] = useState('');
 
-  useEffect(() => {
+  const fetchSession = useCallback(() => {
     if (!id) return;
     sessionsApi.get(id).then((s) => {
       setSession(s);
@@ -22,10 +23,17 @@ export function SessionDetail() {
     }).catch((e) => setError(e.message));
   }, [id]);
 
+  useEffect(() => {
+    fetchSession();
+    // Poll session status every 3s to catch state transitions
+    const interval = setInterval(fetchSession, 3000);
+    return () => clearInterval(interval);
+  }, [fetchSession]);
+
   const handleStop = async () => {
     if (!id) return;
     await sessionsApi.stop(id);
-    setSession((s) => s ? { ...s, status: 'stopped' } : s);
+    fetchSession();
   };
 
   const handleSendInput = async () => {
@@ -48,6 +56,9 @@ export function SessionDetail() {
         <h1 className="text-2xl font-bold">{session.name}</h1>
         <StatusBadge status={session.status} />
         <span className="text-sm text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{session.agent_type}</span>
+        <button onClick={fetchSession} className="text-gray-500 hover:text-gray-300 ml-auto" title="Refresh">
+          <RefreshCw size={16} />
+        </button>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -59,11 +70,23 @@ export function SessionDetail() {
             ) : session.host_id.slice(0, 8)}
           </div>
           <div className="text-sm"><span className="text-gray-500">Branch:</span> <span className="font-mono text-xs">{session.branch_name}</span></div>
+          {session.worktree_path && (
+            <div className="text-sm"><span className="text-gray-500">Worktree:</span> <span className="font-mono text-xs">{session.worktree_path}</span></div>
+          )}
+          {session.tmux_session && (
+            <div className="text-sm"><span className="text-gray-500">Tmux:</span> <span className="font-mono text-xs">{session.tmux_session}</span></div>
+          )}
           {session.model_override && (
             <div className="text-sm"><span className="text-gray-500">Model:</span> {session.model_override}</div>
           )}
           {session.agent_pid > 0 && (
             <div className="text-sm"><span className="text-gray-500">PID:</span> {session.agent_pid}</div>
+          )}
+          {session.started_at && (
+            <div className="text-sm"><span className="text-gray-500">Started:</span> {new Date(session.started_at).toLocaleString()}</div>
+          )}
+          {session.stopped_at && (
+            <div className="text-sm"><span className="text-gray-500">Stopped:</span> {new Date(session.stopped_at).toLocaleString()}</div>
           )}
         </div>
 
@@ -73,10 +96,13 @@ export function SessionDetail() {
         </div>
       </div>
 
-      {/* Output viewer - placeholder for xterm.js in Phase 2 */}
-      <div className="bg-gray-950 border border-gray-800 rounded-lg">
+      {/* Terminal output with xterm.js */}
+      <div className="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
-          <span className="text-sm text-gray-400">Output</span>
+          <span className="text-sm text-gray-400">
+            Output
+            {isActive && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+          </span>
           {isActive && (
             <button
               onClick={handleStop}
@@ -86,11 +112,16 @@ export function SessionDetail() {
             </button>
           )}
         </div>
-        <div className="p-4 font-mono text-xs text-gray-300 min-h-[200px] max-h-[500px] overflow-auto whitespace-pre-wrap">
-          {session.last_output || <span className="text-gray-600">No output yet. Output streaming will be available in Phase 2.</span>}
+        <div className="p-1">
+          <TerminalOutput
+            initialOutput={session.last_output}
+            sessionId={id}
+            isActive={isActive}
+          />
         </div>
         {isActive && (
           <div className="flex items-center border-t border-gray-800 px-4 py-2 gap-2">
+            <span className="text-gray-600 text-sm">$</span>
             <input
               className="flex-1 bg-transparent text-sm text-gray-200 outline-none font-mono"
               placeholder="Send input to session..."

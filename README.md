@@ -64,7 +64,7 @@ auth:
 
 ## API
 
-All endpoints (except `/api/v1/health`) require authentication via Bearer token:
+All endpoints (except `/api/v1/health`) require authentication via Bearer token or `?token=` query parameter:
 
 ```bash
 curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
@@ -79,9 +79,20 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
 | GET | `/api/v1/hosts/{id}/sessions` | Sessions on a host |
 | GET/POST | `/api/v1/sessions` | List / create sessions |
 | GET/DELETE | `/api/v1/sessions/{id}` | Session detail / cleanup |
-| POST | `/api/v1/sessions/{id}/stop` | Stop a session |
-| POST | `/api/v1/sessions/{id}/input` | Send input to session |
-| GET | `/api/v1/sessions/{id}/output` | Get session output |
+| POST | `/api/v1/sessions/{id}/stop` | Stop a session (kills tmux, removes worktree) |
+| POST | `/api/v1/sessions/{id}/input` | Send input to tmux session |
+| GET | `/api/v1/sessions/{id}/output` | Get session output (live capture) |
+| WS | `/api/v1/ws/sessions/{id}/output` | WebSocket live output stream |
+
+## Session Lifecycle
+
+When you create a session from the UI, the control plane:
+
+1. **Creates a git worktree** on the target host via SSH (`git worktree add -b <branch> <path> HEAD`)
+2. **Starts a tmux session** in the worktree directory (`tmux new-session -d -s swoop-<id> -c <path>`)
+3. **Launches the AI agent** inside tmux (e.g., `claude --print '<prompt>'` or `codex '<prompt>'`)
+4. **Polls output** via `tmux capture-pane` every 1s, broadcasting to WebSocket subscribers
+5. **On stop**: kills the tmux session, removes the worktree, updates status
 
 ## Project Structure
 
@@ -89,58 +100,63 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
 swoops/
 ├── pkg/                  # Shared Go library
 │   ├── models/           #   Domain types (Host, Session, Plugin, etc.)
-│   ├── tmux/             #   Tmux CLI wrapper
-│   ├── worktree/         #   Git worktree CLI wrapper
+│   ├── tmux/             #   Tmux CLI wrapper (local + SSH)
+│   ├── worktree/         #   Git worktree CLI wrapper (local + SSH)
 │   └── sshexec/          #   SSH client with known_hosts TOFU
 ├── server/               # Control plane
 │   ├── cmd/swoopsd/      #   Server entrypoint
 │   └── internal/
 │       ├── config/       #   YAML + env config
 │       ├── store/        #   SQLite persistence + migrations
-│       ├── api/          #   REST API (Chi router, auth middleware)
+│       ├── sessionmgr/   #   Session lifecycle orchestration via SSH
+│       ├── api/          #   REST + WebSocket API (Chi router, auth)
 │       └── frontend/     #   go:embed compiled React assets
 ├── agent/                # Swoops agent (runs on each host)
 │   └── cmd/swoops-agent/ #   Agent entrypoint (stub)
 ├── web/                  # React + Vite + Tailwind frontend
 │   └── src/
-│       ├── api/          #   Typed API client with auth
+│       ├── api/          #   Typed API client with auth + WebSocket
 │       ├── stores/       #   Zustand state management
 │       ├── pages/        #   Dashboard, Hosts, Sessions, etc.
-│       └── components/   #   Reusable UI components
+│       └── components/   #   TerminalOutput, CreateSessionDialog, etc.
 ├── proto/                # Protobuf definitions (Phase 3)
 ├── Makefile
 └── go.work
 ```
 
-## Current Status — Phase 1 Complete
+## Current Status — Phase 2 Complete
 
 ### What works now
-- **Control plane server** — single Go binary (16MB) with embedded React frontend
-- **API authentication** — Bearer token auth on all mutating endpoints, auto-generated key on first run
+- **Control plane server** — single Go binary (17MB) with embedded React frontend
+- **API authentication** — Bearer token auth + `?token=` query param (for WebSocket), auto-generated key on first run
 - **Host management** — register, update, delete hosts via REST API and Web UI
-- **Session management** — create, list, stop, delete sessions via REST API and Web UI
+- **Session orchestration via SSH** — create sessions that launch AI agents on remote hosts:
+  - Git worktree creation on remote host
+  - Tmux session creation and agent launch
+  - Live output capture via `tmux capture-pane` polling (1s interval)
+  - Send input to running sessions
+  - Stop sessions (kill tmux + remove worktree)
+- **WebSocket output streaming** — live terminal output via `/api/v1/ws/sessions/{id}/output`
+- **xterm.js terminal viewer** — real terminal rendering in the browser with WebSocket + polling fallback
+- **CreateSessionDialog** — create sessions from the Web UI (select host, agent type, prompt, branch)
 - **SQLite persistence** — WAL mode, foreign key enforcement, automatic migrations
-- **Web UI** — Dashboard, Hosts list, Host detail, Sessions list, Session detail pages
-- **SSH client** — known_hosts TOFU (trust on first use), key mismatch rejection
-- **Test suite** — store tests (CRUD, foreign keys, not-found) + API tests (auth, validation, error sanitization)
+- **Web UI** — Dashboard, Hosts list/detail, Sessions list/detail with live terminal, Plugins/Templates stubs
+- **SSH client** — known_hosts TOFU (trust on first use), key mismatch rejection, connection pooling
+- **Test suite** — 24 tests: store CRUD (9), API endpoints (8), session manager (7)
 
 ### Security
 - All API routes (except health) require Bearer token authentication
+- WebSocket auth via `?token=` query parameter (browser WebSocket can't set headers)
 - CORS restricted to configured origins (defaults to localhost only)
 - Internal errors are logged server-side, clients receive generic "internal server error"
 - SSH host key verification via known_hosts (TOFU, rejects mismatches)
 - SQLite foreign key constraints enforced
 - Delete/update operations return 404 for nonexistent resources
+- Constant-time API key comparison
 
 ## Roadmap
 
-### Phase 2: Sessions via SSH (next)
-- Execute tmux/worktree operations on remote hosts over SSH
-- Launch Claude Code and Codex sessions from the Web UI
-- WebSocket-based live output streaming (tmux capture-pane)
-- Send input to running sessions
-
-### Phase 3: Swoops Agent + gRPC
+### Phase 3: Swoops Agent + gRPC (next)
 - Agent daemon on each host (systemd on Linux, launchd on macOS)
 - gRPC bidirectional streaming (agent-initiated, NAT-friendly)
 - Heartbeat tracking, host status FSM
@@ -174,7 +190,7 @@ make clean          # Clean build artifacts
 ```
 
 ### Prerequisites
-- Go 1.23+
+- Go 1.25+
 - Node.js 18+
 - npm
 

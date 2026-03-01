@@ -19,19 +19,24 @@ func APIKeyAuth(apiKey string) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Extract token from Authorization header or ?token= query param (for WebSocket)
+			var token string
 			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					token = parts[1]
+				}
+			}
+			if token == "" {
+				token = r.URL.Query().Get("token")
+			}
+			if token == "" {
 				writeError(w, http.StatusUnauthorized, "missing Authorization header")
 				return
 			}
 
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				writeError(w, http.StatusUnauthorized, "invalid Authorization header format, expected: Bearer <key>")
-				return
-			}
-
-			if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(apiKey)) != 1 {
+			if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
 				writeError(w, http.StatusForbidden, "invalid API key")
 				return
 			}

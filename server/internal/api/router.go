@@ -3,23 +3,34 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/gorilla/websocket"
 	"github.com/swoopsh/swoops/server/internal/config"
 	"github.com/swoopsh/swoops/server/internal/frontend"
+	"github.com/swoopsh/swoops/server/internal/sessionmgr"
 	"github.com/swoopsh/swoops/server/internal/store"
 )
 
 type Server struct {
-	store  *store.Store
-	config *config.Config
-	router chi.Router
+	store      *store.Store
+	config     *config.Config
+	sessionMgr *sessionmgr.Manager
+	wsUpgrader websocket.Upgrader
+	router     chi.Router
+
+	// launchFunc is called asynchronously after session creation.
+	// Defaults to sessionMgr.LaunchSession. Override in tests to disable SSH.
+	launchFunc func(sessionID, hostID string) error
 }
 
 func NewServer(s *store.Store, cfg *config.Config) *Server {
-	srv := &Server{store: s, config: cfg}
+	mgr := sessionmgr.New(s)
+	srv := &Server{store: s, config: cfg, sessionMgr: mgr}
+	srv.launchFunc = mgr.LaunchSession
 	srv.setupRoutes()
 	return srv
 }
@@ -47,6 +58,13 @@ func (s *Server) setupRoutes() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// WebSocket upgrader with origin allowlist matching CORS config
+	s.wsUpgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 4096,
+		CheckOrigin:     buildOriginChecker(allowedOrigins),
+	}
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Health check is unauthenticated
@@ -80,6 +98,9 @@ func (s *Server) setupRoutes() {
 					r.Get("/output", s.handleGetOutput)
 				})
 			})
+
+			// WebSocket endpoints
+			r.Get("/ws/sessions/{id}/output", s.handleSessionOutputWS)
 		})
 	})
 
@@ -89,6 +110,38 @@ func (s *Server) setupRoutes() {
 	s.router = r
 }
 
+// buildOriginChecker returns a function that checks WebSocket upgrade requests
+// against the configured allowed origins.
+func buildOriginChecker(allowedOrigins []string) func(r *http.Request) bool {
+	// Build set of allowed origin hosts for fast lookup
+	allowed := make(map[string]bool)
+	for _, origin := range allowedOrigins {
+		if u, err := url.Parse(origin); err == nil {
+			allowed[u.Host] = true
+		}
+	}
+
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// No Origin header — same-origin request (non-browser or same page)
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return allowed[u.Host]
+	}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+// Close cleans up the server resources (session manager, SSH connections).
+func (s *Server) Close() {
+	if s.sessionMgr != nil {
+		s.sessionMgr.Close()
+	}
 }

@@ -195,6 +195,108 @@ func TestUpdateStatusNonexistentSession(t *testing.T) {
 	}
 }
 
+func TestUpdateSession(t *testing.T) {
+	s := testStore(t)
+
+	// Create host first
+	now := time.Now()
+	h := &models.Host{
+		ID: models.NewID(), Name: "h1", Hostname: "10.0.0.1",
+		SSHPort: 22, SSHUser: "u", SSHKeyPath: "/k",
+		Status: models.HostStatusOffline, MaxSessions: 10,
+		BaseRepoPath: "/r", WorktreeRoot: "/w",
+		Labels: map[string]string{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateHost(h); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create session
+	sess := &models.Session{
+		ID: models.NewID(), Name: "s1", HostID: h.ID,
+		AgentType: models.AgentTypeClaude, Status: models.SessionStatusPending,
+		Prompt: "fix bug", BranchName: "swoops/s1",
+		EnvVars: map[string]string{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update session
+	sess.Status = models.SessionStatusRunning
+	sess.WorktreePath = "/w/s1"
+	sess.TmuxSessionName = "swoop-abc123"
+	sess.LastOutput = "hello world"
+	startedAt := time.Now()
+	sess.StartedAt = &startedAt
+	if err := s.UpdateSession(sess); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+
+	// Verify
+	got, err := s.GetSession(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.SessionStatusRunning {
+		t.Errorf("status = %q, want running", got.Status)
+	}
+	if got.WorktreePath != "/w/s1" {
+		t.Errorf("worktree_path = %q, want /w/s1", got.WorktreePath)
+	}
+	if got.TmuxSessionName != "swoop-abc123" {
+		t.Errorf("tmux_session = %q, want swoop-abc123", got.TmuxSessionName)
+	}
+	if got.LastOutput != "hello world" {
+		t.Errorf("last_output = %q, want 'hello world'", got.LastOutput)
+	}
+	if got.StartedAt == nil {
+		t.Error("started_at should be set")
+	}
+}
+
+func TestUpdateSessionOutput(t *testing.T) {
+	s := testStore(t)
+
+	// Create host + session
+	now := time.Now()
+	h := &models.Host{
+		ID: models.NewID(), Name: "h2", Hostname: "10.0.0.2",
+		SSHPort: 22, SSHUser: "u", SSHKeyPath: "/k",
+		Status: models.HostStatusOffline, MaxSessions: 10,
+		BaseRepoPath: "/r", WorktreeRoot: "/w",
+		Labels: map[string]string{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateHost(h); err != nil {
+		t.Fatal(err)
+	}
+	sess := &models.Session{
+		ID: models.NewID(), Name: "s2", HostID: h.ID,
+		AgentType: models.AgentTypeClaude, Status: models.SessionStatusRunning,
+		Prompt: "fix bug", BranchName: "swoops/s2",
+		EnvVars: map[string]string{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update output
+	if err := s.UpdateSessionOutput(sess.ID, "new output"); err != nil {
+		t.Fatalf("UpdateSessionOutput: %v", err)
+	}
+
+	got, _ := s.GetSession(sess.ID)
+	if got.LastOutput != "new output" {
+		t.Errorf("last_output = %q, want 'new output'", got.LastOutput)
+	}
+
+	// Update nonexistent
+	err := s.UpdateSessionOutput("nonexistent", "x")
+	if err != ErrNotFound {
+		t.Errorf("UpdateSessionOutput nonexistent: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestForeignKeyEnforced(t *testing.T) {
 	s := testStore(t)
 	now := time.Now()

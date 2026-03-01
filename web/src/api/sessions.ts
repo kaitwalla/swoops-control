@@ -15,4 +15,17 @@ export const sessionsApi = {
   del: (id: string) => api.del<void>(`/sessions/${id}`),
   sendInput: (id: string, input: string) =>
     api.post<{ status: string }>(`/sessions/${id}/input`, { input }),
+  getOutput: (id: string) => api.get<{ output: string }>(`/sessions/${id}/output`),
 };
+
+// WebSocket output stream
+export function createOutputWebSocket(sessionId: string): WebSocket {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  const apiKey = localStorage.getItem('swoops_api_key') || '';
+  // Pass API key as query param since WebSocket doesn't support custom headers in browser
+  const ws = new WebSocket(
+    `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(apiKey)}`
+  );
+  return ws;
+}
