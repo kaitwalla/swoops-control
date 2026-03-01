@@ -19,6 +19,7 @@ type Server struct {
 	store      *store.Store
 	config     *config.Config
 	sessionMgr *sessionmgr.Manager
+	agentOut   AgentOutputSource
 	wsUpgrader websocket.Upgrader
 	router     chi.Router
 
@@ -33,6 +34,21 @@ func NewServer(s *store.Store, cfg *config.Config) *Server {
 	srv.launchFunc = mgr.LaunchSession
 	srv.setupRoutes()
 	return srv
+}
+
+type AgentOutputSource interface {
+	SubscribeSessionOutput(sessionID string) chan string
+	UnsubscribeSessionOutput(sessionID string, ch chan string)
+}
+
+func (s *Server) SetAgentOutputSource(src AgentOutputSource) {
+	s.agentOut = src
+}
+
+func (s *Server) SetAgentController(controller sessionmgr.AgentController) {
+	if s.sessionMgr != nil {
+		s.sessionMgr.SetAgentController(controller)
+	}
 }
 
 func (s *Server) setupRoutes() {

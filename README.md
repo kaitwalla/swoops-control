@@ -29,6 +29,15 @@ make build
 
 # Development mode (server + frontend hot reload)
 make dev
+
+# Start an agent (after host registration)
+./bin/swoops-agent run --server 127.0.0.1:9090 --host-id <host-id>
+
+# Install as a persistent service
+# Linux user service:
+./bin/swoops-agent service-install --host-id <host-id> --server 127.0.0.1:9090 --scope user
+# macOS launchd agent:
+./bin/swoops-agent service-install --host-id <host-id> --server 127.0.0.1:9090
 ```
 
 The server starts on `http://localhost:8080`. On first run, it generates an ephemeral API key printed to stdout. Set `SWOOPS_API_KEY` or configure `auth.api_key` in a config file to persist it.
@@ -57,6 +66,9 @@ database:
 grpc:
   host: 0.0.0.0
   port: 9090
+  tls_cert: /path/to/cert.pem  # Required in production (insecure=false)
+  tls_key: /path/to/key.pem    # Required in production
+  insecure: true               # Set to false in production
 
 auth:
   api_key: your-persistent-api-key
@@ -112,7 +124,7 @@ swoops/
 │       ├── api/          #   REST + WebSocket API (Chi router, auth)
 │       └── frontend/     #   go:embed compiled React assets
 ├── agent/                # Swoops agent (runs on each host)
-│   └── cmd/swoops-agent/ #   Agent entrypoint (stub)
+│   └── cmd/swoops-agent/ #   Agent entrypoint + service installer (systemd/launchd)
 ├── web/                  # React + Vite + Tailwind frontend
 │   └── src/
 │       ├── api/          #   Typed API client with auth + WebSocket
@@ -124,7 +136,7 @@ swoops/
 └── go.work
 ```
 
-## Current Status — Phase 2 Complete
+## Current Status — Phase 3 Complete
 
 ### What works now
 - **Control plane server** — single Go binary (17MB) with embedded React frontend
@@ -142,25 +154,50 @@ swoops/
 - **SQLite persistence** — WAL mode, foreign key enforcement, automatic migrations
 - **Web UI** — Dashboard, Hosts list/detail, Sessions list/detail with live terminal, Plugins/Templates stubs
 - **SSH client** — known_hosts TOFU (trust on first use), key mismatch rejection, connection pooling
-- **Test suite** — 24 tests: store CRUD (9), API endpoints (8), session manager (7)
+- **Test suite** — 40+ tests: store CRUD (10), API endpoints (8), session manager (7), agent connection (11+), heartbeat monitoring (4)
+- **gRPC Agent Service** — bidirectional streaming for agent connections with authentication and optional TLS
+- **Agent-based orchestration** — sessions can be launched via connected agents (gRPC) with automatic SSH fallback
+- **Host heartbeat monitoring** — automatic host status tracking (online/degraded/offline) based on agent heartbeats
+- **Live output streaming** — dual-path output (tmux polling for SSH, gRPC streaming from agents)
+- **Structured logging** — JSON logs with slog for production observability
 
 ### Security
 - All API routes (except health) require Bearer token authentication
 - WebSocket auth via `?token=` query parameter (browser WebSocket can't set headers)
+- **Agent authentication** — cryptographically secure tokens (256-bit) with constant-time comparison
+- **gRPC TLS support** — configurable TLS encryption for agent connections (production recommended)
+- **Input validation** — comprehensive validation of all gRPC inputs (host IDs, tokens, versions)
 - CORS restricted to configured origins (defaults to localhost only)
 - Internal errors are logged server-side, clients receive generic "internal server error"
 - SSH host key verification via known_hosts (TOFU, rejects mismatches)
 - SQLite foreign key constraints enforced
 - Delete/update operations return 404 for nonexistent resources
 - Constant-time API key comparison
+- Agent auth tokens excluded from JSON API responses
 
 ## Roadmap
 
-### Phase 3: Swoops Agent + gRPC (next)
-- Agent daemon on each host (systemd on Linux, launchd on macOS)
-- gRPC bidirectional streaming (agent-initiated, NAT-friendly)
-- Heartbeat tracking, host status FSM
-- Output streaming via gRPC instead of SSH polling
+### Phase 3: Swoops Agent + gRPC ✅ COMPLETE
+**Implemented:**
+- ✅ gRPC bidirectional streaming endpoint (`AgentService/Connect`)
+- ✅ Agent authentication with 256-bit secure tokens
+- ✅ TLS support for agent connections (configurable)
+- ✅ Heartbeat tracking with host status FSM (`online`/`degraded`/`offline`)
+- ✅ Background heartbeat monitor with configurable thresholds
+- ✅ Session output ingestion via gRPC stream (dual-path: tmux + gRPC)
+- ✅ WebSocket terminal endpoint streams from both SSH tmux and gRPC agent output
+- ✅ Session lifecycle routing prefers connected agent, with automatic SSH fallback
+- ✅ Agent command execution with explicit acknowledgements and timeout handling (10s)
+- ✅ Comprehensive input validation and error handling
+- ✅ Structured logging with slog (JSON format)
+- ✅ Concurrent connection handling with proper lock ordering
+- ✅ Test suite: concurrent connections, heartbeat monitoring, command failures
+- ✅ JSON codec for gRPC (human-readable, easier debugging)
+
+**What's left for agents:**
+- Agent daemon implementation (`swoops-agent run`)
+- Agent service installer (systemd/launchd)
+- Agent-side session management (worktree + tmux + output streaming)
 
 ### Phase 4: MCP Bridge
 - Agent acts as MCP stdio server for AI agents
@@ -174,11 +211,13 @@ swoops/
 - Agent CLI installation (Claude Code, Codex) via plugin system
 
 ### Phase 6: Production Hardening
-- HTTPS/TLS for control plane
-- mTLS for agent connections
+- HTTPS/TLS for control plane (HTTP server)
+- ✅ TLS for agent gRPC connections (implemented in Phase 3)
+- mTLS for agent connections (mutual TLS authentication)
 - Prometheus metrics
 - Docker images
 - Integration tests
+- ✅ Structured logging (implemented in Phase 3)
 
 ## Building
 

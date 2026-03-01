@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,12 +29,49 @@ type DatabaseConfig struct {
 }
 
 type GRPCConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	TLSCert  string `yaml:"tls_cert"`  // Path to TLS certificate file
+	TLSKey   string `yaml:"tls_key"`   // Path to TLS private key file
+	Insecure bool   `yaml:"insecure"`  // Allow insecure connections (dev only)
 }
 
 type AuthConfig struct {
 	APIKey string `yaml:"api_key"`
+}
+
+// Validate checks the configuration for errors
+func (c *Config) Validate() error {
+	// Validate server port
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
+	}
+
+	// Validate gRPC port
+	if c.GRPC.Port < 1 || c.GRPC.Port > 65535 {
+		return fmt.Errorf("grpc.port must be between 1 and 65535, got %d", c.GRPC.Port)
+	}
+
+	// Validate TLS configuration
+	if !c.GRPC.Insecure {
+		if c.GRPC.TLSCert == "" {
+			return fmt.Errorf("grpc.tls_cert is required when insecure=false")
+		}
+		if c.GRPC.TLSKey == "" {
+			return fmt.Errorf("grpc.tls_key is required when insecure=false")
+		}
+		// Check if files exist
+		if _, err := os.Stat(c.GRPC.TLSCert); err != nil {
+			return fmt.Errorf("grpc.tls_cert file not found: %w", err)
+		}
+		if _, err := os.Stat(c.GRPC.TLSKey); err != nil {
+			return fmt.Errorf("grpc.tls_key file not found: %w", err)
+		}
+	} else {
+		log.Printf("Warning: gRPC is running in INSECURE mode (no TLS). This should only be used for development.")
+	}
+
+	return nil
 }
 
 func DefaultConfig() *Config {
@@ -47,8 +85,9 @@ func DefaultConfig() *Config {
 			Path: "swoops.db",
 		},
 		GRPC: GRPCConfig{
-			Host: "0.0.0.0",
-			Port: 9090,
+			Host:     "0.0.0.0",
+			Port:     9090,
+			Insecure: true, // Default to insecure for dev, should be false in production
 		},
 		Auth: AuthConfig{},
 	}
@@ -76,6 +115,30 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SWOOPS_DB_PATH"); v != "" {
 		cfg.Database.Path = v
+	}
+	if v := os.Getenv("SWOOPS_GRPC_HOST"); v != "" {
+		cfg.GRPC.Host = v
+	}
+	if v := os.Getenv("SWOOPS_GRPC_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 && p <= 65535 {
+			cfg.GRPC.Port = p
+		} else {
+			log.Printf("Warning: invalid SWOOPS_GRPC_PORT value: %s (must be 1-65535)", v)
+		}
+	}
+	if v := os.Getenv("SWOOPS_GRPC_TLS_CERT"); v != "" {
+		cfg.GRPC.TLSCert = v
+	}
+	if v := os.Getenv("SWOOPS_GRPC_TLS_KEY"); v != "" {
+		cfg.GRPC.TLSKey = v
+	}
+	if v := os.Getenv("SWOOPS_GRPC_INSECURE"); v != "" {
+		cfg.GRPC.Insecure = v == "true" || v == "1"
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	// Auto-generate API key if not set

@@ -22,6 +22,7 @@ type Host struct {
 	Arch             string            `json:"arch" db:"arch"`
 	Status           HostStatus        `json:"status" db:"status"`
 	AgentVersion     string            `json:"agent_version" db:"agent_version"`
+	AgentAuthToken   string            `json:"-" db:"agent_auth_token"` // Exclude from JSON for security
 	Labels           map[string]string `json:"labels"`
 	MaxSessions      int               `json:"max_sessions" db:"max_sessions"`
 	BaseRepoPath     string            `json:"base_repo_path" db:"base_repo_path"`

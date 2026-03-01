@@ -40,13 +40,19 @@ func New(dbPath string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	data, err := migrationsFS.ReadFile("migrations/001_init.sql")
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+	migrations := []string{
+		"migrations/001_init.sql",
+		"migrations/002_add_agent_auth.sql",
 	}
-	_, err = s.db.Exec(string(data))
-	if err != nil {
-		return fmt.Errorf("exec migration: %w", err)
+
+	for _, migration := range migrations {
+		data, err := migrationsFS.ReadFile(migration)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", migration, err)
+		}
+		if _, err := s.db.Exec(string(data)); err != nil {
+			return fmt.Errorf("exec %s: %w", migration, err)
+		}
 	}
 	return nil
 }
@@ -62,11 +68,20 @@ func (s *Store) CreateHost(h *models.Host) error {
 	pluginsJSON, _ := json.Marshal(h.InstalledPlugins)
 	toolsJSON, _ := json.Marshal(h.InstalledTools)
 
+	// Generate auth token if not provided
+	if h.AgentAuthToken == "" {
+		token, err := models.GenerateAuthToken()
+		if err != nil {
+			return fmt.Errorf("generate auth token: %w", err)
+		}
+		h.AgentAuthToken = token
+	}
+
 	_, err := s.db.Exec(`
-		INSERT INTO hosts (id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO hosts (id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		h.ID, h.Name, h.Hostname, h.SSHPort, h.SSHUser, h.SSHKeyPath, h.OS, h.Arch,
-		h.Status, h.AgentVersion, string(labelsJSON), h.MaxSessions,
+		h.Status, h.AgentVersion, h.AgentAuthToken, string(labelsJSON), h.MaxSessions,
 		h.BaseRepoPath, h.WorktreeRoot, string(pluginsJSON), string(toolsJSON),
 		h.CreatedAt, h.UpdatedAt,
 	)
@@ -74,12 +89,12 @@ func (s *Store) CreateHost(h *models.Host) error {
 }
 
 func (s *Store) GetHost(id string) (*models.Host, error) {
-	row := s.db.QueryRow(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts WHERE id = ?`, id)
 	return scanHost(row)
 }
 
 func (s *Store) ListHosts() ([]*models.Host, error) {
-	rows, err := s.db.Query(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +133,55 @@ func (s *Store) UpdateHost(h *models.Host) error {
 
 func (s *Store) DeleteHost(id string) error {
 	res, err := s.db.Exec(`DELETE FROM hosts WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
+func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch string, at time.Time) error {
+	now := time.Now()
+	res, err := s.db.Exec(`
+		UPDATE hosts
+		SET status=?, agent_version=CASE WHEN ? <> '' THEN ? ELSE agent_version END,
+		    os=CASE WHEN ? <> '' THEN ? ELSE os END,
+		    arch=CASE WHEN ? <> '' THEN ? ELSE arch END,
+		    last_heartbeat=?, updated_at=?
+		WHERE id=?`,
+		models.HostStatusOnline,
+		agentVersion, agentVersion,
+		osName, osName,
+		arch, arch,
+		at, now, id,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
+func (s *Store) TouchHostHeartbeat(id string, at time.Time) error {
+	now := time.Now()
+	res, err := s.db.Exec(`
+		UPDATE hosts
+		SET status=?, last_heartbeat=?, updated_at=?
+		WHERE id=?`,
+		models.HostStatusOnline, at, now, id,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
+func (s *Store) UpdateHostStatus(id string, status models.HostStatus) error {
+	now := time.Now()
+	res, err := s.db.Exec(`
+		UPDATE hosts
+		SET status=?, updated_at=?
+		WHERE id=?`,
+		status, now, id,
+	)
 	if err != nil {
 		return err
 	}
@@ -259,7 +323,7 @@ func scanHost(row scannable) (*models.Host, error) {
 
 	err := row.Scan(
 		&h.ID, &h.Name, &h.Hostname, &h.SSHPort, &h.SSHUser, &h.SSHKeyPath,
-		&h.OS, &h.Arch, &h.Status, &h.AgentVersion, &labelsJSON,
+		&h.OS, &h.Arch, &h.Status, &h.AgentVersion, &h.AgentAuthToken, &labelsJSON,
 		&h.MaxSessions, &h.BaseRepoPath, &h.WorktreeRoot,
 		&pluginsJSON, &toolsJSON, &lastHeartbeat,
 		&h.CreatedAt, &h.UpdatedAt,

@@ -19,9 +19,18 @@ import (
 type Manager struct {
 	store *store.Store
 
-	mu      sync.Mutex
-	clients map[string]*sshexec.Client // host ID -> SSH client
-	outputs map[string]*OutputStreamer  // session ID -> output streamer
+	mu              sync.Mutex
+	clients         map[string]*sshexec.Client // host ID -> SSH client
+	outputs         map[string]*OutputStreamer // session ID -> output streamer
+	agentController AgentController
+}
+
+// AgentController coordinates session lifecycle via connected swoops-agent daemons.
+type AgentController interface {
+	IsHostConnected(hostID string) bool
+	LaunchSession(sess *models.Session, host *models.Host) error
+	StopSession(sess *models.Session, host *models.Host) error
+	SendInput(sess *models.Session, host *models.Host, input string) error
 }
 
 // New creates a new session manager.
@@ -31,6 +40,12 @@ func New(s *store.Store) *Manager {
 		clients: make(map[string]*sshexec.Client),
 		outputs: make(map[string]*OutputStreamer),
 	}
+}
+
+func (m *Manager) SetAgentController(c AgentController) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agentController = c
 }
 
 // getSSHClient returns a cached or new SSH client for the given host.
@@ -64,6 +79,221 @@ func (m *Manager) LaunchSession(sessionID, hostID string) error {
 		return fmt.Errorf("get host: %w", err)
 	}
 
+	if m.shouldUseAgent(host.ID) {
+		if err := m.launchViaAgent(sess, host); err == nil {
+			return nil
+		} else {
+			log.Printf("session %s agent launch failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
+		}
+	}
+	return m.launchViaSSH(sess, host)
+}
+
+// StopSession stops a running session: kills tmux, removes worktree.
+func (m *Manager) StopSession(sess *models.Session, host *models.Host) error {
+	if m.shouldUseAgent(host.ID) {
+		if err := m.stopViaAgent(sess, host); err == nil {
+			return nil
+		} else {
+			log.Printf("session %s agent stop failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
+		}
+	}
+
+	client := m.getSSHClient(host)
+	execFn := client.ExecFunc()
+
+	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
+	wtManager := &worktree.Manager{ExecFunc: execFn}
+
+	// Stop output streamer
+	m.mu.Lock()
+	if streamer, ok := m.outputs[sess.ID]; ok {
+		streamer.Stop()
+		delete(m.outputs, sess.ID)
+	}
+	m.mu.Unlock()
+
+	// Update status to stopping
+	sess.Status = models.SessionStatusStopping
+	m.store.UpdateSession(sess)
+
+	// Kill tmux session
+	if sess.TmuxSessionName != "" {
+		if err := tmuxRunner.KillSession(sess.TmuxSessionName); err != nil {
+			log.Printf("warn: kill tmux session %s: %v", sess.TmuxSessionName, err)
+		}
+	}
+
+	// Remove worktree
+	if sess.WorktreePath != "" {
+		if err := wtManager.Remove(host.BaseRepoPath, sess.WorktreePath); err != nil {
+			log.Printf("warn: remove worktree %s: %v", sess.WorktreePath, err)
+		}
+	}
+
+	// Update session to stopped
+	now := time.Now()
+	sess.Status = models.SessionStatusStopped
+	sess.StoppedAt = &now
+	if err := m.store.UpdateSession(sess); err != nil {
+		return fmt.Errorf("update session to stopped: %w", err)
+	}
+
+	log.Printf("session %s stopped", sess.ID)
+	return nil
+}
+
+// SendInput sends text to a running session's tmux pane.
+func (m *Manager) SendInput(sess *models.Session, host *models.Host, input string) error {
+	if m.shouldUseAgent(host.ID) {
+		if err := m.sendInputViaAgent(sess, host, input); err == nil {
+			return nil
+		} else {
+			log.Printf("session %s agent input failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
+		}
+	}
+
+	client := m.getSSHClient(host)
+	execFn := client.ExecFunc()
+	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
+
+	if sess.TmuxSessionName == "" {
+		return fmt.Errorf("session has no tmux session")
+	}
+
+	return tmuxRunner.SendKeys(sess.TmuxSessionName, input)
+}
+
+// GetOutput captures the current output from a session's tmux pane.
+func (m *Manager) GetOutput(sess *models.Session, host *models.Host) (string, error) {
+	client := m.getSSHClient(host)
+	execFn := client.ExecFunc()
+	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
+
+	if sess.TmuxSessionName == "" {
+		return sess.LastOutput, nil
+	}
+
+	output, err := tmuxRunner.CapturePane(sess.TmuxSessionName, 500)
+	if err != nil {
+		// If tmux session is gone, return last stored output
+		return sess.LastOutput, nil
+	}
+
+	return output, nil
+}
+
+// GetOutputStreamer returns the output streamer for a session, if active.
+func (m *Manager) GetOutputStreamer(sessionID string) *OutputStreamer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.outputs[sessionID]
+}
+
+// Close cleans up all SSH connections and stops all streamers.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, streamer := range m.outputs {
+		streamer.Stop()
+	}
+
+	for _, client := range m.clients {
+		client.Close()
+	}
+}
+
+func (m *Manager) failSession(sess *models.Session, err error) {
+	log.Printf("session %s failed: %v", sess.ID, err)
+	now := time.Now()
+	sess.Status = models.SessionStatusFailed
+	sess.StoppedAt = &now
+	sess.LastOutput = fmt.Sprintf("Error: %v", err)
+	m.store.UpdateSession(sess)
+}
+
+func (m *Manager) shouldUseAgent(hostID string) bool {
+	m.mu.Lock()
+	controller := m.agentController
+	m.mu.Unlock()
+	return controller != nil && controller.IsHostConnected(hostID)
+}
+
+func (m *Manager) launchViaAgent(sess *models.Session, host *models.Host) error {
+	worktreePath := filepath.Join(host.WorktreeRoot, sess.Name)
+	tmuxSession := tmuxName(sess.ID)
+	sess.Status = models.SessionStatusStarting
+	sess.WorktreePath = worktreePath
+	sess.TmuxSessionName = tmuxSession
+	now := time.Now()
+	sess.StartedAt = &now
+	if err := m.store.UpdateSession(sess); err != nil {
+		return fmt.Errorf("update session to starting: %w", err)
+	}
+
+	m.mu.Lock()
+	controller := m.agentController
+	m.mu.Unlock()
+	if controller == nil {
+		return fmt.Errorf("agent controller unavailable")
+	}
+	if err := controller.LaunchSession(sess, host); err != nil {
+		return err
+	}
+
+	sess.Status = models.SessionStatusRunning
+	if err := m.store.UpdateSession(sess); err != nil {
+		return fmt.Errorf("update session to running: %w", err)
+	}
+	log.Printf("session %s launch dispatched via agent on host %s", sess.ID, host.Name)
+	return nil
+}
+
+func (m *Manager) stopViaAgent(sess *models.Session, host *models.Host) error {
+	m.mu.Lock()
+	controller := m.agentController
+	m.mu.Unlock()
+	if controller == nil {
+		return fmt.Errorf("agent controller unavailable")
+	}
+
+	// Stop local tmux poller if it exists from earlier SSH fallback.
+	m.mu.Lock()
+	if streamer, ok := m.outputs[sess.ID]; ok {
+		streamer.Stop()
+		delete(m.outputs, sess.ID)
+	}
+	m.mu.Unlock()
+
+	sess.Status = models.SessionStatusStopping
+	_ = m.store.UpdateSession(sess)
+
+	if err := controller.StopSession(sess, host); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	sess.Status = models.SessionStatusStopped
+	sess.StoppedAt = &now
+	if err := m.store.UpdateSession(sess); err != nil {
+		return fmt.Errorf("update session to stopped: %w", err)
+	}
+	log.Printf("session %s stop dispatched via agent", sess.ID)
+	return nil
+}
+
+func (m *Manager) sendInputViaAgent(sess *models.Session, host *models.Host, input string) error {
+	m.mu.Lock()
+	controller := m.agentController
+	m.mu.Unlock()
+	if controller == nil {
+		return fmt.Errorf("agent controller unavailable")
+	}
+	return controller.SendInput(sess, host, input)
+}
+
+func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 	client := m.getSSHClient(host)
 	execFn := client.ExecFunc()
 
@@ -130,114 +360,6 @@ func (m *Manager) LaunchSession(sessionID, hostID string) error {
 
 	log.Printf("session %s launched on host %s (tmux: %s, worktree: %s)", sess.ID, host.Name, tmuxSession, worktreePath)
 	return nil
-}
-
-// StopSession stops a running session: kills tmux, removes worktree.
-func (m *Manager) StopSession(sess *models.Session, host *models.Host) error {
-	client := m.getSSHClient(host)
-	execFn := client.ExecFunc()
-
-	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
-	wtManager := &worktree.Manager{ExecFunc: execFn}
-
-	// Stop output streamer
-	m.mu.Lock()
-	if streamer, ok := m.outputs[sess.ID]; ok {
-		streamer.Stop()
-		delete(m.outputs, sess.ID)
-	}
-	m.mu.Unlock()
-
-	// Update status to stopping
-	sess.Status = models.SessionStatusStopping
-	m.store.UpdateSession(sess)
-
-	// Kill tmux session
-	if sess.TmuxSessionName != "" {
-		if err := tmuxRunner.KillSession(sess.TmuxSessionName); err != nil {
-			log.Printf("warn: kill tmux session %s: %v", sess.TmuxSessionName, err)
-		}
-	}
-
-	// Remove worktree
-	if sess.WorktreePath != "" {
-		if err := wtManager.Remove(host.BaseRepoPath, sess.WorktreePath); err != nil {
-			log.Printf("warn: remove worktree %s: %v", sess.WorktreePath, err)
-		}
-	}
-
-	// Update session to stopped
-	now := time.Now()
-	sess.Status = models.SessionStatusStopped
-	sess.StoppedAt = &now
-	if err := m.store.UpdateSession(sess); err != nil {
-		return fmt.Errorf("update session to stopped: %w", err)
-	}
-
-	log.Printf("session %s stopped", sess.ID)
-	return nil
-}
-
-// SendInput sends text to a running session's tmux pane.
-func (m *Manager) SendInput(sess *models.Session, host *models.Host, input string) error {
-	client := m.getSSHClient(host)
-	execFn := client.ExecFunc()
-	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
-
-	if sess.TmuxSessionName == "" {
-		return fmt.Errorf("session has no tmux session")
-	}
-
-	return tmuxRunner.SendKeys(sess.TmuxSessionName, input)
-}
-
-// GetOutput captures the current output from a session's tmux pane.
-func (m *Manager) GetOutput(sess *models.Session, host *models.Host) (string, error) {
-	client := m.getSSHClient(host)
-	execFn := client.ExecFunc()
-	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
-
-	if sess.TmuxSessionName == "" {
-		return sess.LastOutput, nil
-	}
-
-	output, err := tmuxRunner.CapturePane(sess.TmuxSessionName, 500)
-	if err != nil {
-		// If tmux session is gone, return last stored output
-		return sess.LastOutput, nil
-	}
-
-	return output, nil
-}
-
-// GetOutputStreamer returns the output streamer for a session, if active.
-func (m *Manager) GetOutputStreamer(sessionID string) *OutputStreamer {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.outputs[sessionID]
-}
-
-// Close cleans up all SSH connections and stops all streamers.
-func (m *Manager) Close() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, streamer := range m.outputs {
-		streamer.Stop()
-	}
-
-	for _, client := range m.clients {
-		client.Close()
-	}
-}
-
-func (m *Manager) failSession(sess *models.Session, err error) {
-	log.Printf("session %s failed: %v", sess.ID, err)
-	now := time.Now()
-	sess.Status = models.SessionStatusFailed
-	sess.StoppedAt = &now
-	sess.LastOutput = fmt.Sprintf("Error: %v", err)
-	m.store.UpdateSession(sess)
 }
 
 // buildAgentCommand constructs the CLI command to launch the AI agent.

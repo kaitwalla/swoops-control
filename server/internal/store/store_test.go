@@ -108,6 +108,65 @@ func TestUpdateNonexistentHost(t *testing.T) {
 	}
 }
 
+func TestHostHeartbeatAndStatusUpdates(t *testing.T) {
+	s := testStore(t)
+
+	now := time.Now()
+	h := &models.Host{
+		ID:           models.NewID(),
+		Name:         "hb-host",
+		Hostname:     "10.0.0.5",
+		SSHPort:      22,
+		SSHUser:      "deploy",
+		SSHKeyPath:   "/tmp/key.pem",
+		Status:       models.HostStatusOffline,
+		MaxSessions:  5,
+		BaseRepoPath: "/opt/swoops/repo",
+		WorktreeRoot: "/opt/swoops/worktrees",
+		Labels:       map[string]string{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.CreateHost(h); err != nil {
+		t.Fatalf("CreateHost: %v", err)
+	}
+
+	heartbeatAt := now.Add(3 * time.Second)
+	if err := s.UpsertHostHeartbeat(h.ID, "v0.3.0", "linux", "arm64", heartbeatAt); err != nil {
+		t.Fatalf("UpsertHostHeartbeat: %v", err)
+	}
+	got, err := s.GetHost(h.ID)
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	if got.Status != models.HostStatusOnline {
+		t.Fatalf("status=%q want %q", got.Status, models.HostStatusOnline)
+	}
+	if got.AgentVersion != "v0.3.0" {
+		t.Fatalf("agent_version=%q want v0.3.0", got.AgentVersion)
+	}
+	if got.LastHeartbeat == nil {
+		t.Fatal("last_heartbeat should be set")
+	}
+
+	if err := s.UpdateHostStatus(h.ID, models.HostStatusDegraded); err != nil {
+		t.Fatalf("UpdateHostStatus: %v", err)
+	}
+	got, _ = s.GetHost(h.ID)
+	if got.Status != models.HostStatusDegraded {
+		t.Fatalf("status=%q want %q", got.Status, models.HostStatusDegraded)
+	}
+
+	nextBeat := heartbeatAt.Add(5 * time.Second)
+	if err := s.TouchHostHeartbeat(h.ID, nextBeat); err != nil {
+		t.Fatalf("TouchHostHeartbeat: %v", err)
+	}
+	got, _ = s.GetHost(h.ID)
+	if got.Status != models.HostStatusOnline {
+		t.Fatalf("status=%q want %q", got.Status, models.HostStatusOnline)
+	}
+}
+
 func TestSessionCRUD(t *testing.T) {
 	s := testStore(t)
 
@@ -129,7 +188,7 @@ func TestSessionCRUD(t *testing.T) {
 		ID: models.NewID(), Name: "s1", HostID: h.ID,
 		AgentType: models.AgentTypeClaude, Status: models.SessionStatusPending,
 		Prompt: "fix bug", BranchName: "swoops/s1",
-		EnvVars: map[string]string{"KEY": "val"},
+		EnvVars:   map[string]string{"KEY": "val"},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.CreateSession(sess); err != nil {

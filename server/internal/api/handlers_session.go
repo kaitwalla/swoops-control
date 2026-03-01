@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -110,7 +111,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	response := *sess // value copy for serialization
 	writeJSON(w, http.StatusCreated, &response)
 
-	// Launch session on host asynchronously via SSH.
+	// Launch session on host asynchronously.
+	// The session manager chooses agent routing when available and falls back to SSH.
 	// Pass only IDs — the launcher re-reads from the store to avoid races.
 	sessionID := sess.ID
 	hostID := req.HostID
@@ -283,18 +285,30 @@ func (s *Server) handleSessionOutputWS(w http.ResponseWriter, r *http.Request) {
 	// Send initial output
 	conn.WriteJSON(map[string]string{"type": "output", "data": sess.LastOutput})
 
-	// Subscribe to live output if session is active
-	streamer := s.sessionMgr.GetOutputStreamer(id)
-	if streamer == nil {
-		// No active streamer — just send current output and close
+	var ch chan string
+	var cleanupOnce sync.Once
+	cleanup := func() {}
+
+	// Prefer tmux streamer for SSH-backed sessions; fall back to gRPC agent output.
+	if streamer := s.sessionMgr.GetOutputStreamer(id); streamer != nil {
+		ch = streamer.Subscribe()
+		cleanup = func() {
+			cleanupOnce.Do(func() { streamer.Unsubscribe(ch) })
+		}
+	} else if s.agentOut != nil {
+		ch = s.agentOut.SubscribeSessionOutput(id)
+		cleanup = func() {
+			cleanupOnce.Do(func() { s.agentOut.UnsubscribeSessionOutput(id, ch) })
+		}
+	} else {
 		return
 	}
+	defer cleanup()
 
-	ch := streamer.Subscribe()
-	defer streamer.Unsubscribe(ch)
-
+	clientDone := make(chan struct{})
 	// Read pump: consume pings/close from client
 	go func() {
+		defer close(clientDone)
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
@@ -303,9 +317,17 @@ func (s *Server) handleSessionOutputWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	for output := range ch {
-		if err := conn.WriteJSON(map[string]string{"type": "output", "data": output}); err != nil {
+	for {
+		select {
+		case <-clientDone:
 			return
+		case output, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(map[string]string{"type": "output", "data": output}); err != nil {
+				return
+			}
 		}
 	}
 }
