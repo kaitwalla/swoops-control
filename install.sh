@@ -136,19 +136,16 @@ setup_install_dir() {
     info "Installing to: $INSTALL_DIR"
 }
 
-# Get the latest release version
-get_latest_version() {
+# Validate version (use "latest" tag for latest builds)
+validate_version() {
     if [ "$VERSION" = "latest" ]; then
-        info "Fetching latest release version..."
-        VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [ -z "$VERSION" ]; then
-            error "Failed to fetch latest version. Please specify a version with --version"
-        fi
-        info "Latest version: $VERSION"
+        info "Using latest build from main branch"
+    else
+        info "Using version: $VERSION"
     fi
 }
 
-# Download and install a binary
+# Download and install a binary from GitHub release
 install_binary() {
     local binary_name="$1"
     local download_name="${binary_name}-${PLATFORM}"
@@ -158,6 +155,7 @@ install_binary() {
 
     if ! curl -fsSL -o "/tmp/${download_name}" "$url"; then
         error "Failed to download $binary_name from $url"
+        error "Please check https://github.com/$REPO/releases for available releases"
     fi
 
     chmod +x "/tmp/${download_name}"
@@ -177,7 +175,7 @@ main() {
 
     detect_platform
     setup_install_dir
-    get_latest_version
+    validate_version
 
     case "$COMPONENT" in
         server)
