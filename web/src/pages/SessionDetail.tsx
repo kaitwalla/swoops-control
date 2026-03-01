@@ -4,6 +4,10 @@ import { sessionsApi } from '../api/sessions';
 import { hostsApi } from '../api/hosts';
 import { StatusBadge } from '../components/StatusBadge';
 import { TerminalOutput } from '../components/TerminalOutput';
+import { AgentStatusPanel } from '../components/AgentStatusPanel';
+import { TaskManagementPanel } from '../components/TaskManagementPanel';
+import { ReviewRequestsPanel } from '../components/ReviewRequestsPanel';
+import { SessionMessagesPanel } from '../components/SessionMessagesPanel';
 import type { Session } from '../types/session';
 import type { Host } from '../types/host';
 import { ArrowLeft, Square, Send, RefreshCw } from 'lucide-react';
@@ -14,6 +18,7 @@ export function SessionDetail() {
   const [host, setHost] = useState<Host | null>(null);
   const [error, setError] = useState('');
   const [inputText, setInputText] = useState('');
+  const [activeTab, setActiveTab] = useState<'status' | 'tasks' | 'reviews' | 'messages'>('status');
 
   const fetchSession = useCallback(() => {
     if (!id) return;
@@ -134,6 +139,50 @@ export function SessionDetail() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* MCP Features */}
+      <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <div className="flex border-b border-gray-800">
+          <button
+            onClick={() => setActiveTab('status')}
+            className={`px-4 py-2 text-sm font-medium ${
+              activeTab === 'status' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            Agent Status
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`px-4 py-2 text-sm font-medium ${
+              activeTab === 'tasks' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            Tasks
+          </button>
+          <button
+            onClick={() => setActiveTab('reviews')}
+            className={`px-4 py-2 text-sm font-medium ${
+              activeTab === 'reviews' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            Review Requests
+          </button>
+          <button
+            onClick={() => setActiveTab('messages')}
+            className={`px-4 py-2 text-sm font-medium ${
+              activeTab === 'messages' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            Messages
+          </button>
+        </div>
+        <div className="p-4">
+          {activeTab === 'status' && <AgentStatusPanel sessionId={id!} />}
+          {activeTab === 'tasks' && <TaskManagementPanel sessionId={id!} />}
+          {activeTab === 'reviews' && <ReviewRequestsPanel sessionId={id!} />}
+          {activeTab === 'messages' && <SessionMessagesPanel sessionId={id!} />}
+        </div>
       </div>
 
       {(session.allowed_tools?.length ?? 0) > 0 && (

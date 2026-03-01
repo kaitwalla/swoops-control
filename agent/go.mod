@@ -7,4 +7,6 @@ require (
 	google.golang.org/grpc v1.77.0
 )
 
+require github.com/modelcontextprotocol/go-sdk v1.4.0 // indirect
+
 replace github.com/swoopsh/swoops/pkg => ../pkg

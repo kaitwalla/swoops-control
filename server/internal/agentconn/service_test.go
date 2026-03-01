@@ -56,7 +56,7 @@ func TestConnectUpdatesHostHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil) // nil logger uses default
+	svc := NewService(st, nil, nil) // nil logger uses default
 	defer svc.Close()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -141,7 +141,7 @@ func TestLaunchSessionSendsCommandToConnectedHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -307,7 +307,7 @@ func TestLaunchSessionCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -394,7 +394,7 @@ func ptrTime(v time.Time) *time.Time {
 
 func TestOutputSubscriptionPublish(t *testing.T) {
 	st := testStore(t)
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	ch := svc.SubscribeSessionOutput("s1")

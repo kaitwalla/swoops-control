@@ -38,7 +38,7 @@ func TestConcurrentConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -153,7 +153,7 @@ func TestConcurrentCommandsDuringDisconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	lis := bufconn.Listen(1024 * 1024)

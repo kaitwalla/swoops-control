@@ -1,6 +1,7 @@
 package sessionmgr
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -8,16 +9,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swoopsh/swoops/pkg/mcpconfig"
 	"github.com/swoopsh/swoops/pkg/models"
 	"github.com/swoopsh/swoops/pkg/sshexec"
 	"github.com/swoopsh/swoops/pkg/tmux"
 	"github.com/swoopsh/swoops/pkg/worktree"
+	"github.com/swoopsh/swoops/server/internal/config"
 	"github.com/swoopsh/swoops/server/internal/store"
 )
 
 // Manager orchestrates session lifecycle operations on remote hosts via SSH.
 type Manager struct {
-	store *store.Store
+	store  *store.Store
+	config *config.Config
 
 	mu              sync.Mutex
 	clients         map[string]*sshexec.Client // host ID -> SSH client
@@ -40,6 +44,11 @@ func New(s *store.Store) *Manager {
 		clients: make(map[string]*sshexec.Client),
 		outputs: make(map[string]*OutputStreamer),
 	}
+}
+
+// SetConfig sets the server configuration (needed for MCP config generation).
+func (m *Manager) SetConfig(cfg *config.Config) {
+	m.config = cfg
 }
 
 func (m *Manager) SetAgentController(c AgentController) {
@@ -326,6 +335,12 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 		return err
 	}
 
+	// 2.5. Generate and install MCP config
+	if err := m.installMCPConfigSSH(client, sess, host, worktreePath); err != nil {
+		log.Printf("warn: failed to install MCP config for session %s: %v", sess.ID, err)
+		// Non-fatal: continue session launch even if MCP config fails
+	}
+
 	// 3. Create tmux session
 	if err := tmuxRunner.CreateSession(tmuxSession, worktreePath); err != nil {
 		// Clean up worktree on failure
@@ -404,4 +419,108 @@ func buildAgentCommand(sess *models.Session) string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// installMCPConfigSSH generates and installs MCP configuration on a remote host via SSH.
+func (m *Manager) installMCPConfigSSH(client *sshexec.Client, sess *models.Session, host *models.Host, worktreePath string) error {
+	if m.config == nil {
+		return fmt.Errorf("server config not set")
+	}
+
+	// Construct the control plane HTTP address for MCP tools
+	var serverAddr string
+	if m.config.Server.ExternalURL != "" {
+		// Use configured external URL for remote agent connectivity
+		serverAddr = m.config.Server.ExternalURL
+	} else if m.config.Server.Host == "0.0.0.0" {
+		// For SSH-based remote hosts, cannot use localhost (it points to the remote host, not control plane)
+		// Attempt to use the SSH hostname that we're connecting to
+		serverAddr = fmt.Sprintf("http://%s:%d", host.Hostname, m.config.Server.Port)
+		log.Printf("Warning: No external_url configured. Using SSH hostname %s for MCP server address. Set SWOOPS_EXTERNAL_URL or server.external_url in config for reliable remote connectivity.", host.Hostname)
+	} else {
+		serverAddr = fmt.Sprintf("http://%s:%d", m.config.Server.Host, m.config.Server.Port)
+	}
+
+	// Determine config file path and content based on agent type
+	var configPath, configContent string
+	var err error
+
+	switch sess.AgentType {
+	case models.AgentTypeClaude:
+		configPath = filepath.Join(worktreePath, ".mcp.json")
+		configContent, err = generateClaudeCodeMCPConfig(sess.ID, serverAddr, m.config.Auth.APIKey)
+	case models.AgentTypeCodex:
+		// Codex may use .codex/mcp.json or similar
+		configPath = filepath.Join(worktreePath, ".codex", "mcp.json")
+		// Create .codex directory first
+		if _, err := client.Exec(fmt.Sprintf("mkdir -p %s", shellQuote(filepath.Join(worktreePath, ".codex")))); err != nil {
+			return fmt.Errorf("create .codex directory: %w", err)
+		}
+		configContent, err = generateCodexMCPConfig(sess.ID, serverAddr, m.config.Auth.APIKey)
+	default:
+		return fmt.Errorf("unsupported agent type: %s", sess.AgentType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("generate MCP config: %w", err)
+	}
+
+	// Write config file via SSH using heredoc to avoid quoting issues
+	cmd := fmt.Sprintf("cat > %s <<'SWOOPS_MCP_EOF'\n%s\nSWOOPS_MCP_EOF", shellQuote(configPath), configContent)
+	if _, err := client.Exec(cmd); err != nil {
+		return fmt.Errorf("write MCP config file: %w", err)
+	}
+
+	log.Printf("installed MCP config for session %s at %s", sess.ID, configPath)
+	return nil
+}
+
+func generateClaudeCodeMCPConfig(sessionID, serverAddr, apiKey string) (string, error) {
+	config := mcpconfig.ClaudeCodeConfig{
+		MCPServers: map[string]mcpconfig.ClaudeCodeServer{
+			"swoops-orchestrator": {
+				Command: "swoops-agent",
+				Args: []string{
+					"mcp-serve",
+					"--session-id", sessionID,
+					"--server", serverAddr,
+				},
+				Env: map[string]string{
+					"SWOOPS_API_KEY": apiKey,
+				},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal JSON: %w", err)
+	}
+	return string(data), nil
+}
+
+func generateCodexMCPConfig(sessionID, serverAddr, apiKey string) (string, error) {
+	// For now, use the same format as Claude Code
+	// This may need adjustment based on Codex's actual MCP implementation
+	config := mcpconfig.ClaudeCodeConfig{
+		MCPServers: map[string]mcpconfig.ClaudeCodeServer{
+			"swoops-orchestrator": {
+				Command: "swoops-agent",
+				Args: []string{
+					"mcp-serve",
+					"--session-id", sessionID,
+					"--server", serverAddr,
+				},
+				Env: map[string]string{
+					"SWOOPS_API_KEY": apiKey,
+				},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal JSON: %w", err)
+	}
+	return string(data), nil
 }

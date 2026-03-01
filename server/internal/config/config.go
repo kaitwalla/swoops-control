@@ -21,6 +21,7 @@ type Config struct {
 type ServerConfig struct {
 	Host           string   `yaml:"host"`
 	Port           int      `yaml:"port"`
+	ExternalURL    string   `yaml:"external_url"` // Public URL for remote agents to connect (e.g., http://swoops.example.com:8080)
 	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
@@ -115,6 +116,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SWOOPS_DB_PATH"); v != "" {
 		cfg.Database.Path = v
+	}
+	if v := os.Getenv("SWOOPS_EXTERNAL_URL"); v != "" {
+		cfg.Server.ExternalURL = v
 	}
 	if v := os.Getenv("SWOOPS_GRPC_HOST"); v != "" {
 		cfg.GRPC.Host = v

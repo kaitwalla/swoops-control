@@ -33,7 +33,7 @@ func TestHeartbeatMonitor(t *testing.T) {
 	}
 
 	// Create service with short intervals for testing
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	svc.checkInterval = 100 * time.Millisecond
 	svc.degradedAfter = 200 * time.Millisecond
 	svc.offlineAfter = 400 * time.Millisecond
@@ -117,7 +117,7 @@ func TestHeartbeatMonitorLoop(t *testing.T) {
 	}
 
 	// Create service with very short intervals
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	svc.checkInterval = 50 * time.Millisecond
 	svc.degradedAfter = 300 * time.Millisecond
 	svc.offlineAfter = 1 * time.Second
@@ -167,7 +167,7 @@ func TestNoHeartbeatIsOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(st, nil)
+	svc := NewService(st, nil, nil)
 	defer svc.Close()
 
 	svc.reconcileHeartbeatStatus(time.Now())

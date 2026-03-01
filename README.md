@@ -95,6 +95,16 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8080/api/v1/hosts
 | POST | `/api/v1/sessions/{id}/input` | Send input to tmux session |
 | GET | `/api/v1/sessions/{id}/output` | Get session output (live capture) |
 | WS | `/api/v1/ws/sessions/{id}/output` | WebSocket live output stream |
+| POST | `/api/v1/sessions/{id}/status` | Report agent status (MCP tool) |
+| GET | `/api/v1/sessions/{id}/status` | List status updates |
+| POST | `/api/v1/sessions/{id}/tasks` | Create task for session |
+| GET | `/api/v1/sessions/{id}/tasks` | List all tasks |
+| GET | `/api/v1/sessions/{id}/tasks/next` | Get next pending task (MCP tool) |
+| POST | `/api/v1/sessions/{id}/reviews` | Create review request (MCP tool) |
+| POST | `/api/v1/sessions/{id}/messages` | Send message to another session (MCP tool) |
+| GET | `/api/v1/sessions/{id}/messages` | List session messages |
+| GET | `/api/v1/reviews` | List all review requests |
+| GET/PUT | `/api/v1/reviews/{review_id}` | Get/update review request |
 
 ## Session Lifecycle
 
@@ -136,7 +146,7 @@ swoops/
 └── go.work
 ```
 
-## Current Status — Phase 3 Complete
+## Current Status — Phase 4 Complete
 
 ### What works now
 - **Control plane server** — single Go binary (17MB) with embedded React frontend
@@ -194,15 +204,29 @@ swoops/
 - ✅ Test suite: concurrent connections, heartbeat monitoring, command failures
 - ✅ JSON codec for gRPC (human-readable, easier debugging)
 
-**What's left for agents:**
-- Agent daemon implementation (`swoops-agent run`)
-- Agent service installer (systemd/launchd)
-- Agent-side session management (worktree + tmux + output streaming)
+**Agent capabilities:**
+- ✅ Agent daemon implementation (`swoops-agent run`)
+- ✅ Agent service installer (systemd/launchd)
+- ✅ Agent-side session management (worktree + tmux + output streaming)
+- ✅ MCP server mode (`swoops-agent mcp-serve`) for AI agent tools
 
-### Phase 4: MCP Bridge
-- Agent acts as MCP stdio server for AI agents
-- Tools: `report_status`, `get_task`, `request_review`, `coordinate_with_session`
-- MCP config generation for Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`)
+### Phase 4: MCP Bridge ✅ COMPLETE
+**Implemented:**
+- ✅ MCP stdio server (`swoops-agent mcp-serve`) using official Go SDK
+- ✅ Four MCP tools for AI agent coordination:
+  - `report_status` - Report agent status (working, idle, blocked, completed, error)
+  - `get_task` - Retrieve next pending task from control plane
+  - `request_review` - Request human review (code, architecture, security, performance)
+  - `coordinate_with_session` - Send messages to other AI agent sessions
+- ✅ Database schema for MCP entities (status updates, tasks, reviews, messages)
+- ✅ Control plane API endpoints for MCP operations
+- ✅ Automatic MCP config generation during session launch
+  - Claude Code: `.mcp.json` with swoops-orchestrator server
+  - Codex: `.codex/mcp.json` (compatible format)
+- ✅ Session-to-session coordination messaging system
+- ✅ Task queue and priority system for agent instructions
+- ✅ Review request workflow with status tracking
+- ✅ Agent status update history with structured details
 
 ### Phase 5: Plugin System
 - Plugins as git repos with `swoops-plugin.yaml` manifest

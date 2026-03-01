@@ -30,6 +30,7 @@ type Server struct {
 
 func NewServer(s *store.Store, cfg *config.Config) *Server {
 	mgr := sessionmgr.New(s)
+	mgr.SetConfig(cfg) // Pass config for MCP config generation
 	srv := &Server{store: s, config: cfg, sessionMgr: mgr}
 	srv.launchFunc = mgr.LaunchSession
 	srv.setupRoutes()
@@ -112,8 +113,27 @@ func (s *Server) setupRoutes() {
 					r.Post("/stop", s.handleStopSession)
 					r.Post("/input", s.handleSendInput)
 					r.Get("/output", s.handleGetOutput)
+
+					// MCP endpoints
+					r.Post("/status", s.handleReportStatus)
+					r.Get("/status", s.handleListStatusUpdates)
+					r.Post("/tasks", s.handleCreateTask)
+					r.Get("/tasks", s.handleListTasks)
+					r.Get("/tasks/next", s.handleGetNextTask)
+					r.Post("/reviews", s.handleCreateReviewRequest)
+					r.Post("/messages", s.handleCreateSessionMessage)
+					r.Get("/messages", s.handleListSessionMessages)
 				})
 			})
+
+			// Global endpoints (not session-specific)
+			r.Get("/reviews", s.handleListReviewRequests)
+			r.Route("/reviews/{review_id}", func(r chi.Router) {
+				r.Get("/", s.handleGetReviewRequest)
+				r.Put("/", s.handleUpdateReviewRequest)
+			})
+			r.Put("/tasks/{task_id}", s.handleUpdateTaskStatus)
+			r.Put("/messages/{message_id}/read", s.handleMarkMessageRead)
 
 			// WebSocket endpoints
 			r.Get("/ws/sessions/{id}/output", s.handleSessionOutputWS)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/swoopsh/swoops/pkg/agentrpc"
 	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/swoopsh/swoops/server/internal/config"
 	"github.com/swoopsh/swoops/server/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,6 +23,7 @@ type Service struct {
 	agentrpc.UnimplementedAgentServiceServer
 
 	store  *store.Store
+	config *config.Config
 	logger *slog.Logger
 
 	checkInterval time.Duration
@@ -51,13 +53,14 @@ type hostConn struct {
 	once   sync.Once
 }
 
-func NewService(s *store.Store, logger *slog.Logger) *Service {
+func NewService(s *store.Store, cfg *config.Config, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	svc := &Service{
 		store:         s,
+		config:        cfg,
 		logger:        logger,
 		checkInterval: defaultCheckInterval,
 		degradedAfter: defaultDegradedAfter,
@@ -335,20 +338,39 @@ func (s *Service) IsHostConnected(hostID string) bool {
 }
 
 func (s *Service) LaunchSession(sess *models.Session, host *models.Host) error {
+	args := map[string]string{
+		"session_name":   sess.Name,
+		"agent_type":     string(sess.AgentType),
+		"prompt":         sess.Prompt,
+		"branch_name":    sess.BranchName,
+		"worktree_path":  sess.WorktreePath,
+		"tmux_session":   sess.TmuxSessionName,
+		"base_repo_path": host.BaseRepoPath,
+		"worktree_root":  host.WorktreeRoot,
+		"model_override": sess.ModelOverride,
+	}
+
+	// Add MCP config parameters if config is available
+	if s.config != nil {
+		var serverAddr string
+		if s.config.Server.ExternalURL != "" {
+			// Use configured external URL for reliable connectivity
+			serverAddr = s.config.Server.ExternalURL
+		} else if s.config.Server.Host == "0.0.0.0" {
+			// For gRPC-connected agents, use localhost (agent is on same machine as control plane)
+			// If host is remote, the SSH path should be used instead
+			serverAddr = fmt.Sprintf("http://localhost:%d", s.config.Server.Port)
+		} else {
+			serverAddr = fmt.Sprintf("http://%s:%d", s.config.Server.Host, s.config.Server.Port)
+		}
+		args["server_addr"] = serverAddr
+		args["api_key"] = s.config.Auth.APIKey
+	}
+
 	cmd := &agentrpc.SessionCommand{
 		SessionID: sess.ID,
 		Command:   agentrpc.CommandLaunch,
-		Args: map[string]string{
-			"session_name":   sess.Name,
-			"agent_type":     string(sess.AgentType),
-			"prompt":         sess.Prompt,
-			"branch_name":    sess.BranchName,
-			"worktree_path":  sess.WorktreePath,
-			"tmux_session":   sess.TmuxSessionName,
-			"base_repo_path": host.BaseRepoPath,
-			"worktree_root":  host.WorktreeRoot,
-			"model_override": sess.ModelOverride,
-		},
+		Args:      args,
 	}
 	return s.sendCommand(host.ID, cmd)
 }
