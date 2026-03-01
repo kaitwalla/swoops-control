@@ -60,12 +60,15 @@ prompt_password() {
 confirm() {
     local prompt_text=$1
     local default=${2:-n}
+    local response
 
     if [ "$default" = "y" ]; then
-        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [Y/n]: ")" response
+        echo -ne "${BLUE}?${NC} $prompt_text [Y/n]: "
+        read -r response
         response=${response:-y}
     else
-        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [y/N]: ")" response
+        echo -ne "${BLUE}?${NC} $prompt_text [y/N]: "
+        read -r response
         response=${response:-n}
     fi
 
