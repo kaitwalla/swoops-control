@@ -46,29 +46,29 @@ Install the latest release binaries:
 
 ```bash
 # Install both server and agent
-curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh | bash
 
 # Install only the server
-curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --server
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh | bash -s -- --server
 
 # Install only the agent
-curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --agent
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh | bash -s -- --agent
 
 # Install specific version to custom directory
-curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh | bash -s -- --version v1.0.0 --install-dir /usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh | bash -s -- --version v1.0.0 --install-dir /usr/local/bin
 ```
 
 Or download the install script and run it locally:
 
 ```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/swoopsh/swoops/main/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh
 chmod +x install.sh
 ./install.sh --help
 ```
 
 ### Manual Download
 
-Download pre-built binaries from the [releases page](https://github.com/swoopsh/swoops/releases):
+Download pre-built binaries from the [releases page](https://github.com/kaitwalla/swoops-control/releases):
 
 - `swoopsd-{linux,darwin}-{amd64,arm64}` - Control plane server
 - `swoops-agent-{linux,darwin}-{amd64,arm64}` - Agent daemon
@@ -83,7 +83,7 @@ For production deployments, use the interactive setup script:
 
 ```bash
 # Download and run the setup script
-curl -fsSL https://raw.githubusercontent.com/swoopsh/swoops/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash
 
 # Or clone and run locally
 ./setup.sh
