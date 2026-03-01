@@ -1,12 +1,12 @@
 #!/bin/bash
 # Swoops installation script
-# Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/swoops/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/install.sh | bash
 # Or: ./install.sh [--server|--agent|--all] [--version VERSION] [--install-dir DIR]
 
 set -e
 
 # Configuration
-REPO="swoopsh/swoops"
+REPO="kaitwalla/swoops-control"
 VERSION="${SWOOPS_VERSION:-latest}"
 INSTALL_DIR="${SWOOPS_INSTALL_DIR:-}"
 COMPONENT="all"  # server, agent, or all
