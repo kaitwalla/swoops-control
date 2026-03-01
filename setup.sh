@@ -34,10 +34,12 @@ prompt() {
     local default=$3
 
     if [ -n "$default" ]; then
-        read -p "$(echo -e "${BLUE}?${NC} $prompt_text [$default]: ")" value
+        echo -ne "${BLUE}?${NC} $prompt_text [$default]: "
+        read value
         eval "$varname=\"${value:-$default}\""
     else
-        read -p "$(echo -e "${BLUE}?${NC} $prompt_text: ")" value
+        echo -ne "${BLUE}?${NC} $prompt_text: "
+        read value
         eval "$varname=\"$value\""
     fi
 }
@@ -46,7 +48,8 @@ prompt_password() {
     local varname=$1
     local prompt_text=$2
 
-    read -s -p "$(echo -e "${BLUE}?${NC} $prompt_text: ")" value
+    echo -ne "${BLUE}?${NC} $prompt_text: "
+    read -s value
     echo
     eval "$varname=\"$value\""
 }
