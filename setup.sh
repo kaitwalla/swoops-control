@@ -202,13 +202,10 @@ if [ "$INSTALL_SERVER" = true ]; then
             GRPC_MTLS_ENABLED=false
         fi
 
-        # Certificate paths
-        prompt GRPC_CERT_PATH "gRPC server certificate path" "/etc/swoops/certs/grpc-server-cert.pem"
-        prompt GRPC_KEY_PATH "gRPC server key path" "/etc/swoops/certs/grpc-server-key.pem"
-
-        if [ "$GRPC_MTLS_ENABLED" = true ]; then
-            prompt GRPC_CLIENT_CA_PATH "Client CA certificate path" "/etc/swoops/certs/client-ca.pem"
-        fi
+        # Set default certificate paths (will be updated later if certificates are generated)
+        GRPC_CERT_PATH="/etc/swoops/certs/grpc-server-cert.pem"
+        GRPC_KEY_PATH="/etc/swoops/certs/grpc-server-key.pem"
+        GRPC_CLIENT_CA_PATH="/etc/swoops/certs/client-ca.pem"
     else
         GRPC_TLS_ENABLED=false
         GRPC_MTLS_ENABLED=false
@@ -217,9 +214,9 @@ if [ "$INSTALL_SERVER" = true ]; then
 
     # HTTP TLS (direct deployment only)
     if [ "$USE_TLS" = true ]; then
-        echo
-        prompt HTTP_CERT_PATH "HTTP server certificate path" "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-        prompt HTTP_KEY_PATH "HTTP server key path" "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+        # Set default HTTP cert paths (for reverse proxy setups these won't be used)
+        HTTP_CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+        HTTP_KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
     fi
 
     echo
@@ -257,13 +254,14 @@ if [ "$INSTALL_AGENT" = true ]; then
 
         if confirm "Use client certificate (mTLS)?" "y"; then
             AGENT_MTLS_ENABLED=true
-            prompt AGENT_CERT_PATH "Agent client certificate path" "/etc/swoops/certs/agent-cert.pem"
-            prompt AGENT_KEY_PATH "Agent client key path" "/etc/swoops/certs/agent-key.pem"
         else
             AGENT_MTLS_ENABLED=false
         fi
 
-        prompt AGENT_CA_PATH "Server CA certificate path" "/etc/swoops/certs/server-ca.pem"
+        # Set default certificate paths (will be updated if certificates are generated)
+        AGENT_CERT_PATH="/etc/swoops/certs/agent-cert.pem"
+        AGENT_KEY_PATH="/etc/swoops/certs/agent-key.pem"
+        AGENT_CA_PATH="/etc/swoops/certs/server-ca.pem"
     else
         AGENT_TLS_ENABLED=false
         AGENT_MTLS_ENABLED=false
@@ -489,14 +487,40 @@ EOF
 
         echo
     else
-        info "You'll need to provide valid certificates before starting."
-        if [ "$USE_REVERSE_PROXY" = true ]; then
-            info "For HTTP: Caddy/nginx will handle certificates automatically."
-        elif [ "$USE_TLS" = true ]; then
-            info "For HTTP: Use certbot to obtain Let's Encrypt certificates."
-        fi
-        info "For gRPC: Generate or obtain certificates for mTLS."
+        # Option 3: Using existing certificates - ask for paths
+        info "Please provide paths to your existing certificates."
         echo
+
+        if [ "$GRPC_TLS_ENABLED" = true ]; then
+            echo -e "${BLUE}gRPC Server Certificates:${NC}"
+            prompt GRPC_CERT_PATH "gRPC server certificate path" "$GRPC_CERT_PATH"
+            prompt GRPC_KEY_PATH "gRPC server key path" "$GRPC_KEY_PATH"
+            if [ "$GRPC_MTLS_ENABLED" = true ]; then
+                prompt GRPC_CLIENT_CA_PATH "Client CA certificate path" "$GRPC_CLIENT_CA_PATH"
+            fi
+            echo
+        fi
+
+        if [ "$USE_TLS" = true ]; then
+            echo -e "${BLUE}HTTP Server Certificates:${NC}"
+            prompt HTTP_CERT_PATH "HTTP server certificate path" "$HTTP_CERT_PATH"
+            prompt HTTP_KEY_PATH "HTTP server key path" "$HTTP_KEY_PATH"
+            echo
+        fi
+
+        if [ "$AGENT_TLS_ENABLED" = true ]; then
+            echo -e "${BLUE}Agent Certificates:${NC}"
+            prompt AGENT_CA_PATH "Server CA certificate path (for agent)" "$AGENT_CA_PATH"
+            if [ "$AGENT_MTLS_ENABLED" = true ]; then
+                prompt AGENT_CERT_PATH "Agent client certificate path" "$AGENT_CERT_PATH"
+                prompt AGENT_KEY_PATH "Agent client key path" "$AGENT_KEY_PATH"
+            fi
+            echo
+        fi
+
+        if [ "$USE_REVERSE_PROXY" = true ]; then
+            info "Note: Caddy/nginx will handle HTTP certificates automatically via Let's Encrypt."
+        fi
     fi
 fi
 
