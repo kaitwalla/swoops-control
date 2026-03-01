@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 )
 
 // ---- Agent Status Updates ----

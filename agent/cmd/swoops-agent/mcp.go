@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/swoopsh/swoops/pkg/version"
+	"github.com/kaitwalla/swoops-control/pkg/version"
 )
 
 func mcpServeCommand(args []string) error {

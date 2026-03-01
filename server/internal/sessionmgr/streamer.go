@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/tmux"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/pkg/tmux"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 // OutputStreamer polls a tmux pane for output and notifies subscribers.

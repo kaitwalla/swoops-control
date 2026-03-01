@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 )
 
 // TestHeartbeatMonitor tests that the background heartbeat monitor

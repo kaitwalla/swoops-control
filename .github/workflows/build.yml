@@ -51,49 +51,49 @@ jobs:
     - name: Build server (linux/amd64)
       run: |
         GOOS=linux GOARCH=amd64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoopsd-linux-amd64 ./server/cmd/swoopsd
 
     - name: Build server (linux/arm64)
       run: |
         GOOS=linux GOARCH=arm64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoopsd-linux-arm64 ./server/cmd/swoopsd
 
     - name: Build server (darwin/amd64)
       run: |
         GOOS=darwin GOARCH=amd64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoopsd-darwin-amd64 ./server/cmd/swoopsd
 
     - name: Build server (darwin/arm64)
       run: |
         GOOS=darwin GOARCH=arm64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoopsd-darwin-arm64 ./server/cmd/swoopsd
 
     - name: Build agent (linux/amd64)
       run: |
         GOOS=linux GOARCH=amd64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoops-agent-linux-amd64 ./agent/cmd/swoops-agent
 
     - name: Build agent (linux/arm64)
       run: |
         GOOS=linux GOARCH=arm64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoops-agent-linux-arm64 ./agent/cmd/swoops-agent
 
     - name: Build agent (darwin/amd64)
       run: |
         GOOS=darwin GOARCH=amd64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoops-agent-darwin-amd64 ./agent/cmd/swoops-agent
 
     - name: Build agent (darwin/arm64)
       run: |
         GOOS=darwin GOARCH=arm64 go build \
-          -ldflags "-X github.com/swoopsh/swoops/pkg/version.Version=${{ env.VERSION }} -X github.com/swoopsh/swoops/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/swoopsh/swoops/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
+          -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ env.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${{ env.GIT_COMMIT }} -X github.com/kaitwalla/swoops-control/pkg/version.BuildTime=${{ env.BUILD_TIME }}" \
           -o bin/swoops-agent-darwin-arm64 ./agent/cmd/swoops-agent
 
     - name: Upload artifacts

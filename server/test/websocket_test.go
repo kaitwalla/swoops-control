@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/swoopsh/swoops/pkg/models"
-	"github.com/swoopsh/swoops/server/internal/agentconn"
-	"github.com/swoopsh/swoops/server/internal/api"
-	"github.com/swoopsh/swoops/server/internal/config"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/pkg/models"
+	"github.com/kaitwalla/swoops-control/server/internal/agentconn"
+	"github.com/kaitwalla/swoops-control/server/internal/api"
+	"github.com/kaitwalla/swoops-control/server/internal/config"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 // TestWebSocketWithMetricsMiddleware verifies WebSocket upgrade works with metrics middleware

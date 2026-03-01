@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/agentrpc"
-	"github.com/swoopsh/swoops/pkg/version"
-	"github.com/swoopsh/swoops/server/internal/agentconn"
-	"github.com/swoopsh/swoops/server/internal/api"
-	"github.com/swoopsh/swoops/server/internal/config"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
+	"github.com/kaitwalla/swoops-control/pkg/version"
+	"github.com/kaitwalla/swoops-control/server/internal/agentconn"
+	"github.com/kaitwalla/swoops-control/server/internal/api"
+	"github.com/kaitwalla/swoops-control/server/internal/config"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )

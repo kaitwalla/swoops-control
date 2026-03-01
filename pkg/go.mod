@@ -1,4 +1,4 @@
-module github.com/swoopsh/swoops/pkg
+module github.com/kaitwalla/swoops-control/pkg
 
 go 1.25.0
 

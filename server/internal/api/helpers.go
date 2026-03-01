@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

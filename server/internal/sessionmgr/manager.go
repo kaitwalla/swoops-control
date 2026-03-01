@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/mcpconfig"
-	"github.com/swoopsh/swoops/pkg/models"
-	"github.com/swoopsh/swoops/pkg/sshexec"
-	"github.com/swoopsh/swoops/pkg/tmux"
-	"github.com/swoopsh/swoops/pkg/worktree"
-	"github.com/swoopsh/swoops/server/internal/config"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/pkg/mcpconfig"
+	"github.com/kaitwalla/swoops-control/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/sshexec"
+	"github.com/kaitwalla/swoops-control/pkg/tmux"
+	"github.com/kaitwalla/swoops-control/pkg/worktree"
+	"github.com/kaitwalla/swoops-control/server/internal/config"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 // Manager orchestrates session lifecycle operations on remote hosts via SSH.

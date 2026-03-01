@@ -1014,6 +1014,6 @@ du -h /var/lib/swoops/swoops.db
 
 ## Support
 
-- Documentation: https://github.com/swoopsh/swoops
-- Issues: https://github.com/swoopsh/swoops/issues
+- Documentation: https://github.com/kaitwalla/swoops-control
+- Issues: https://github.com/kaitwalla/swoops-control/issues
 - Security: security@swoops.sh (for security vulnerabilities)

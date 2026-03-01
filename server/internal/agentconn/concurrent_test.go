@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/agentrpc"
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"

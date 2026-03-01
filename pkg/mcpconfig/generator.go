@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 )
 
 // ClaudeCodeConfig represents the .mcp.json format for Claude Code

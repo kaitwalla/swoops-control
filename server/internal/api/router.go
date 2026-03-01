@@ -9,11 +9,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/gorilla/websocket"
-	"github.com/swoopsh/swoops/server/internal/config"
-	"github.com/swoopsh/swoops/server/internal/frontend"
-	"github.com/swoopsh/swoops/server/internal/metrics"
-	"github.com/swoopsh/swoops/server/internal/sessionmgr"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/server/internal/config"
+	"github.com/kaitwalla/swoops-control/server/internal/frontend"
+	"github.com/kaitwalla/swoops-control/server/internal/metrics"
+	"github.com/kaitwalla/swoops-control/server/internal/sessionmgr"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 type Server struct {

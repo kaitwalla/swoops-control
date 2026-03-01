@@ -1,4 +1,4 @@
-module github.com/swoopsh/swoops/server
+module github.com/kaitwalla/swoops-control/server
 
 go 1.25.0
 
@@ -6,8 +6,8 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/gorilla/websocket v1.5.3
+	github.com/kaitwalla/swoops-control/pkg v0.0.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/swoopsh/swoops/pkg v0.0.0
 	google.golang.org/grpc v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
@@ -39,4 +39,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/swoopsh/swoops/pkg => ../pkg
+replace github.com/kaitwalla/swoops-control/pkg => ../pkg

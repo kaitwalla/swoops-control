@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/version"
+	"github.com/kaitwalla/swoops-control/pkg/version"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 )
 
 type createSessionRequest struct {

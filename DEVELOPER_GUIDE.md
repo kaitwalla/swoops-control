@@ -165,7 +165,7 @@ swoops-agent service-install  # Install as systemd/launchd service
 
 ```bash
 # Clone repository
-git clone https://github.com/swoopsh/swoops.git
+git clone https://github.com/kaitwalla/swoops-control.git
 cd swoops
 
 # Build everything (frontend + server + agent)

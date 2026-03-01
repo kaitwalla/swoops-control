@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swoopsh/swoops/pkg/models"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 )
 
 func testMCPStore(t *testing.T) *Store {

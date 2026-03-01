@@ -8,9 +8,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/swoopsh/swoops/pkg/models"
-	"github.com/swoopsh/swoops/server/internal/config"
-	"github.com/swoopsh/swoops/server/internal/store"
+	"github.com/kaitwalla/swoops-control/pkg/models"
+	"github.com/kaitwalla/swoops-control/server/internal/config"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 const testAPIKey = "test-api-key-12345"

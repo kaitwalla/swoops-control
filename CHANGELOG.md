@@ -172,6 +172,6 @@ This release marks Swoops as production-ready with enterprise-grade security, ob
 
 ## Support
 
-- **Issues**: https://github.com/swoopsh/swoops/issues
-- **Documentation**: https://github.com/swoopsh/swoops
+- **Issues**: https://github.com/kaitwalla/swoops-control/issues
+- **Documentation**: https://github.com/kaitwalla/swoops-control
 - **Security**: security@swoops.sh
