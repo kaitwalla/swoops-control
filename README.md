@@ -92,10 +92,26 @@ curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup
 The setup script will:
 - ✅ Guide you through all configuration options
 - ✅ Generate configuration files for server/agent
-- ✅ Optionally generate self-signed certificates for testing
+- ✅ Generate certificates via step-ca (automated CA with renewal) or self-signed
 - ✅ Configure reverse proxy (Caddy or nginx)
 - ✅ Install as systemd/launchd service
 - ✅ Provide next steps for starting services
+
+**Certificate Distribution for Remote Agents:**
+
+When using TLS/mTLS with remote agents, you need to distribute certificates from the server:
+
+```bash
+# On each agent machine, copy the CA certificate from the server
+scp user@server:/etc/swoops/certs/server-ca.pem /etc/swoops/certs/
+
+# If using mTLS, also copy client certificates
+scp user@server:/etc/swoops/certs/agent-cert.pem /etc/swoops/certs/
+scp user@server:/etc/swoops/certs/agent-key.pem /etc/swoops/certs/
+chmod 600 /etc/swoops/certs/agent-key.pem  # Keep private key secure
+```
+
+The setup script provides detailed instructions for your specific configuration.
 
 ### Development
 
