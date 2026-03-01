@@ -34,15 +34,15 @@ prompt() {
     local default=$3
 
     if [ -n "$default" ]; then
-        echo -ne "${BLUE}?${NC} $prompt_text [$default]: "
-        read -r value
+        echo -ne "${BLUE}?${NC} $prompt_text [$default]: " >&2
+        read -r value </dev/tty
         if [ -z "$value" ]; then
             value="$default"
         fi
         printf -v "$varname" '%s' "$value"
     else
-        echo -ne "${BLUE}?${NC} $prompt_text: "
-        read -r value
+        echo -ne "${BLUE}?${NC} $prompt_text: " >&2
+        read -r value </dev/tty
         printf -v "$varname" '%s' "$value"
     fi
 }
@@ -51,9 +51,9 @@ prompt_password() {
     local varname=$1
     local prompt_text=$2
 
-    echo -ne "${BLUE}?${NC} $prompt_text: "
-    read -rs value
-    echo
+    echo -ne "${BLUE}?${NC} $prompt_text: " >&2
+    read -rs value </dev/tty
+    echo >&2
     printf -v "$varname" '%s' "$value"
 }
 
@@ -63,12 +63,12 @@ confirm() {
     local response
 
     if [ "$default" = "y" ]; then
-        echo -ne "${BLUE}?${NC} $prompt_text [Y/n]: "
-        read -r response
+        echo -ne "${BLUE}?${NC} $prompt_text [Y/n]: " >&2
+        read -r response </dev/tty
         response=${response:-y}
     else
-        echo -ne "${BLUE}?${NC} $prompt_text [y/N]: "
-        read -r response
+        echo -ne "${BLUE}?${NC} $prompt_text [y/N]: " >&2
+        read -r response </dev/tty
         response=${response:-n}
     fi
 
