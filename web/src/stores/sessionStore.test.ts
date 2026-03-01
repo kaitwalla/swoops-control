@@ -129,7 +129,7 @@ describe('sessionStore', () => {
 
   describe('stopSession', () => {
     it('should stop a session and update its status', async () => {
-      vi.mocked(sessionsApi.stop).mockResolvedValue(undefined);
+      vi.mocked(sessionsApi.stop).mockResolvedValue({ status: 'stopped' });
 
       // Set initial state with a running session
       useSessionStore.setState({ sessions: [mockSession] });
@@ -144,7 +144,7 @@ describe('sessionStore', () => {
 
     it('should only update the specified session', async () => {
       const session2: Session = { ...mockSession, id: 'session-2', status: 'running' };
-      vi.mocked(sessionsApi.stop).mockResolvedValue(undefined);
+      vi.mocked(sessionsApi.stop).mockResolvedValue({ status: 'stopped' });
 
       useSessionStore.setState({ sessions: [mockSession, session2] });
 

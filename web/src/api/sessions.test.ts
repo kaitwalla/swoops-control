@@ -140,7 +140,7 @@ describe('createOutputWebSocket', () => {
     });
 
     // Mock WebSocket
-    global.WebSocket = vi.fn() as any;
+    globalThis.WebSocket = vi.fn() as any;
   });
 
   it('should create WebSocket with correct URL and API key from localStorage', () => {

@@ -6,7 +6,7 @@ describe('API client', () => {
     vi.clearAllMocks();
     localStorage.clear();
     // Reset fetch mock
-    global.fetch = vi.fn();
+    globalThis.fetch = vi.fn();
   });
 
   describe('setApiKey', () => {
@@ -167,7 +167,7 @@ describe('API client', () => {
         json: async () => {
           throw new Error('Invalid JSON');
         },
-      } as Response);
+      } as unknown as Response);
 
       await expect(api.get('/test')).rejects.toThrow('Internal Server Error');
     });
