@@ -303,12 +303,72 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                 exit 1
             fi
 
-            # Install step CLI
+            # Install step CLI based on OS
             STEP_VERSION="0.27.5"
-            wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb" -O /tmp/step-cli.deb
-            sudo dpkg -i /tmp/step-cli.deb
-            rm /tmp/step-cli.deb
-            success "step CLI installed"
+
+            if [ "$OS" = "macos" ]; then
+                # macOS installation
+                if command -v brew &> /dev/null; then
+                    info "Installing step via Homebrew..."
+                    brew install step || {
+                        error "Failed to install step via Homebrew"
+                        exit 1
+                    }
+                else
+                    error "Homebrew not found. Please install Homebrew first or install step manually from https://smallstep.com/docs/step-cli/installation"
+                    exit 1
+                fi
+            elif [ "$OS" = "linux" ]; then
+                # Linux installation
+                if command -v apt-get &> /dev/null; then
+                    # Debian/Ubuntu
+                    info "Downloading step CLI for Debian/Ubuntu..."
+                    if ! wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb" -O /tmp/step-cli.deb; then
+                        error "Failed to download step CLI"
+                        exit 1
+                    fi
+
+                    info "Installing step CLI..."
+                    if ! sudo dpkg -i /tmp/step-cli.deb; then
+                        error "Failed to install step CLI"
+                        rm -f /tmp/step-cli.deb
+                        exit 1
+                    fi
+                    rm -f /tmp/step-cli.deb
+                elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                    # RHEL/CentOS/Fedora
+                    PKG_MGR="yum"
+                    command -v dnf &> /dev/null && PKG_MGR="dnf"
+
+                    info "Downloading step CLI for RHEL/CentOS/Fedora..."
+                    if ! wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.rpm" -O /tmp/step-cli.rpm; then
+                        error "Failed to download step CLI"
+                        exit 1
+                    fi
+
+                    info "Installing step CLI..."
+                    if ! sudo $PKG_MGR install -y /tmp/step-cli.rpm; then
+                        error "Failed to install step CLI"
+                        rm -f /tmp/step-cli.rpm
+                        exit 1
+                    fi
+                    rm -f /tmp/step-cli.rpm
+                else
+                    error "Unsupported Linux distribution. Please install step manually from https://smallstep.com/docs/step-cli/installation"
+                    exit 1
+                fi
+            else
+                error "Unsupported OS: $OS"
+                exit 1
+            fi
+
+            # Verify installation
+            if ! command -v step &> /dev/null; then
+                error "step CLI installation failed - command not found after install"
+                exit 1
+            fi
+
+            success "step CLI installed successfully (version $(step version | head -1))"
         fi
 
         CERT_DIR="/etc/swoops/certs"
