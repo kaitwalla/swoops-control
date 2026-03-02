@@ -323,8 +323,20 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                 if command -v apt-get &> /dev/null; then
                     # Debian/Ubuntu
                     info "Downloading step CLI for Debian/Ubuntu..."
-                    if ! wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb" -O /tmp/step-cli.deb; then
-                        error "Failed to download step CLI"
+                    STEP_URL="https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb"
+
+                    if command -v curl &> /dev/null; then
+                        if ! curl -fsSL "$STEP_URL" -o /tmp/step-cli.deb; then
+                            error "Failed to download step CLI from $STEP_URL"
+                            exit 1
+                        fi
+                    elif command -v wget &> /dev/null; then
+                        if ! wget --max-redirect=5 -q "$STEP_URL" -O /tmp/step-cli.deb; then
+                            error "Failed to download step CLI from $STEP_URL"
+                            exit 1
+                        fi
+                    else
+                        error "Neither curl nor wget found. Please install one of them first."
                         exit 1
                     fi
 
@@ -341,8 +353,20 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                     command -v dnf &> /dev/null && PKG_MGR="dnf"
 
                     info "Downloading step CLI for RHEL/CentOS/Fedora..."
-                    if ! wget -q "https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.rpm" -O /tmp/step-cli.rpm; then
-                        error "Failed to download step CLI"
+                    STEP_URL="https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.rpm"
+
+                    if command -v curl &> /dev/null; then
+                        if ! curl -fsSL "$STEP_URL" -o /tmp/step-cli.rpm; then
+                            error "Failed to download step CLI from $STEP_URL"
+                            exit 1
+                        fi
+                    elif command -v wget &> /dev/null; then
+                        if ! wget --max-redirect=5 -q "$STEP_URL" -O /tmp/step-cli.rpm; then
+                            error "Failed to download step CLI from $STEP_URL"
+                            exit 1
+                        fi
+                    else
+                        error "Neither curl nor wget found. Please install one of them first."
                         exit 1
                     fi
 
