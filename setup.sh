@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.0.7"
+SETUP_SCRIPT_VERSION="1.0.8"
 
 # Colors for output
 RED='\033[0;31m'
@@ -489,27 +489,36 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         # Debug: show the actual command and step version
         info "Step CLI version: $(step version 2>&1 | head -1)"
 
-        # Check if step-ca is actually running
-        if ! curl -k https://localhost:9000/health 2>/dev/null; then
-            warn "step-ca health check failed, waiting a bit longer..."
-            sleep 5
-        fi
+        # Wait for step-ca to be fully ready
+        info "Waiting for step-ca to be ready..."
+        for i in {1..10}; do
+            if curl -k https://localhost:9000/health 2>/dev/null | grep -q "ok"; then
+                success "step-ca is ready"
+                break
+            fi
+            sleep 2
+        done
 
-        # Try without STEPPATH first to see if that's the issue
-        info "Attempting certificate generation..."
+        # Use step certificate create instead of step ca certificate
+        # This creates certificates directly signed by our CA without needing the online CA
+        info "Generating gRPC server certificate using step certificate..."
 
-        # Build command as array to avoid parsing issues
-        set -x  # Enable command tracing
-        step ca certificate \
+        sudo step certificate create \
             "$DOMAIN" \
             "$TEMP_CERT_DIR/grpc-server-cert.pem" \
             "$TEMP_CERT_DIR/grpc-server-key.pem" \
-            --provisioner admin \
-            --ca-url https://localhost:9000 \
-            --root "$STEP_CA_DIR/certs/root_ca.crt" \
+            --profile leaf \
             --not-after 8760h \
-            --insecure
-        set +x  # Disable command tracing
+            --ca "$STEP_CA_DIR/certs/root_ca.crt" \
+            --ca-key "$STEP_CA_DIR/secrets/root_ca_key" \
+            --no-password \
+            --insecure \
+            --san "$DOMAIN" \
+            --san localhost \
+            --san 127.0.0.1
+
+        # Fix ownership of generated files
+        sudo chown $(whoami):$(whoami) "$TEMP_CERT_DIR/grpc-server-cert.pem" "$TEMP_CERT_DIR/grpc-server-key.pem"
 
         # Move certificates to final location
         sudo mv "$TEMP_CERT_DIR/grpc-server-cert.pem" "$CERT_DIR/grpc-server-cert.pem"
@@ -521,17 +530,19 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             info "Generating agent client certificate..."
             TEMP_CERT_DIR=$(mktemp -d)
 
-            set -x
-            step ca certificate \
+            sudo step certificate create \
                 "swoops-agent" \
                 "$TEMP_CERT_DIR/agent-cert.pem" \
                 "$TEMP_CERT_DIR/agent-key.pem" \
-                --provisioner admin \
-                --ca-url https://localhost:9000 \
-                --root "$STEP_CA_DIR/certs/root_ca.crt" \
+                --profile leaf \
                 --not-after 8760h \
+                --ca "$STEP_CA_DIR/certs/root_ca.crt" \
+                --ca-key "$STEP_CA_DIR/secrets/root_ca_key" \
+                --no-password \
                 --insecure
-            set +x
+
+            # Fix ownership of generated files
+            sudo chown $(whoami):$(whoami) "$TEMP_CERT_DIR/agent-cert.pem" "$TEMP_CERT_DIR/agent-key.pem"
 
             # Move certificates to final location
             sudo mv "$TEMP_CERT_DIR/agent-cert.pem" "$CERT_DIR/agent-cert.pem"
