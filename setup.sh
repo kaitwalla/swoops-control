@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.2.0"
+SETUP_SCRIPT_VERSION="1.2.1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -97,6 +97,20 @@ echo -e "${NC}"
 info "This script will help you configure Swoops for production deployment."
 echo
 
+# Detect OS early (needed for update path)
+OS="unknown"
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    OS="linux"
+    if command -v systemctl &> /dev/null; then
+        INIT_SYSTEM="systemd"
+    else
+        INIT_SYSTEM="other"
+    fi
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="macos"
+    INIT_SYSTEM="launchd"
+fi
+
 # Check if swoopsd is already installed
 if command -v swoopsd &> /dev/null; then
     SWOOPSD_PATH=$(which swoopsd)
@@ -186,20 +200,6 @@ if command -v swoopsd &> /dev/null; then
     echo
     info "Continuing with full setup..."
     echo
-fi
-
-# Detect OS
-OS="unknown"
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    OS="linux"
-    if command -v systemctl &> /dev/null; then
-        INIT_SYSTEM="systemd"
-    else
-        INIT_SYSTEM="other"
-    fi
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    OS="macos"
-    INIT_SYSTEM="launchd"
 fi
 
 info "Detected OS: $OS ($INIT_SYSTEM)"
