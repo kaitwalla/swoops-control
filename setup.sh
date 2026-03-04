@@ -398,8 +398,30 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         CERT_DIR="/etc/swoops/certs"
         sudo mkdir -p "$CERT_DIR"
 
-        # Initialize a local step CA if not already done
+        # Clean up any existing step-ca processes and partial installations
         STEP_CA_DIR="/etc/swoops/step-ca"
+
+        # Stop any running step-ca processes
+        if pgrep -f "step-ca" > /dev/null; then
+            warn "Found running step-ca process. Stopping it..."
+            sudo pkill -f "step-ca" || true
+            sleep 1
+            success "Stopped existing step-ca processes"
+        fi
+
+        # Check for partial/incomplete installations
+        if [ -d "$STEP_CA_DIR" ] && [ ! -f "$STEP_CA_DIR/config/ca.json" ]; then
+            warn "Found incomplete step-ca installation at $STEP_CA_DIR"
+            if confirm "Remove incomplete installation and start fresh?" "y"; then
+                sudo rm -rf "$STEP_CA_DIR"
+                success "Removed incomplete installation"
+            else
+                error "Cannot proceed with incomplete installation. Exiting."
+                exit 1
+            fi
+        fi
+
+        # Initialize a local step CA if not already done
         if [ ! -d "$STEP_CA_DIR" ]; then
             info "Initializing step-ca in $STEP_CA_DIR..."
 
