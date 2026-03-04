@@ -1229,6 +1229,17 @@ EOF
                 sudo mkdir -p /var/cache/swoops/autocert
                 sudo chown -R swoops:swoops /var/cache/swoops
                 sudo chmod 700 /var/cache/swoops/autocert
+
+                # Grant capability to bind to privileged ports (80, 443)
+                info "Granting swoopsd permission to bind to ports 80 and 443..."
+                SWOOPSD_PATH=$(which swoopsd || echo '/usr/local/bin/swoopsd')
+                if command -v setcap &> /dev/null; then
+                    sudo setcap 'cap_net_bind_service=+ep' "$SWOOPSD_PATH"
+                    success "Granted CAP_NET_BIND_SERVICE capability to $SWOOPSD_PATH"
+                else
+                    warn "setcap not found. You may need to run as root or install libcap2-bin"
+                    warn "Without this, swoopsd won't be able to bind to ports 80 and 443"
+                fi
             fi
 
             sudo systemctl daemon-reload
