@@ -454,7 +454,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
 
         # Generate gRPC server certificate
         info "Generating gRPC server certificate..."
-        sudo step ca certificate "$DOMAIN" \
+        sudo STEPPATH="$STEP_CA_DIR" step ca certificate "$DOMAIN" \
             "$CERT_DIR/grpc-server-cert.pem" \
             "$CERT_DIR/grpc-server-key.pem" \
             --provisioner admin \
@@ -466,7 +466,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         # Generate agent client certificates if mTLS enabled
         if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
             info "Generating agent client certificate..."
-            sudo step ca certificate "swoops-agent" \
+            sudo STEPPATH="$STEP_CA_DIR" step ca certificate "swoops-agent" \
                 "$CERT_DIR/agent-cert.pem" \
                 "$CERT_DIR/agent-key.pem" \
                 --provisioner admin \
