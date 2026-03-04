@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -13,10 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
+	"github.com/kaitwalla/swoops-control/pkg/models"
 	"github.com/kaitwalla/swoops-control/pkg/version"
 	"github.com/kaitwalla/swoops-control/server/internal/agentconn"
 	"github.com/kaitwalla/swoops-control/server/internal/api"
@@ -24,11 +27,18 @@ import (
 	"github.com/kaitwalla/swoops-control/server/internal/config"
 	"github.com/kaitwalla/swoops-control/server/internal/store"
 	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/term"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 func main() {
+	// Check for subcommands first
+	if len(os.Args) > 1 && os.Args[1] == "create-user" {
+		runCreateUser(os.Args[2:])
+		return
+	}
+
 	configPath := flag.String("config", "", "path to config file")
 	showVersion := flag.Bool("version", false, "show version information and exit")
 	doUpdate := flag.Bool("update", false, "update swoopsd from git and rebuild")
@@ -425,4 +435,94 @@ func performUpdate() error {
 		log.Println("  Restart your swoopsd service")
 	}
 	return nil
+}
+
+// runCreateUser handles the create-user subcommand
+func runCreateUser(args []string) {
+	if len(args) != 2 {
+		fmt.Println("Usage: swoopsd create-user <username> <email>")
+		fmt.Println("Password will be read securely from stdin")
+		fmt.Println("Example: swoopsd create-user admin admin@example.com")
+		os.Exit(1)
+	}
+
+	username := args[0]
+	email := args[1]
+
+	// Read password securely from stdin
+	var password string
+	if term.IsTerminal(int(syscall.Stdin)) {
+		// Interactive mode: prompt for password without echo
+		fmt.Print("Enter password: ")
+		passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Println() // New line after password input
+		if err != nil {
+			log.Fatalf("Failed to read password: %v", err)
+		}
+		password = string(passwordBytes)
+
+		// Confirm password
+		fmt.Print("Confirm password: ")
+		confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Println() // New line after confirmation
+		if err != nil {
+			log.Fatalf("Failed to read password confirmation: %v", err)
+		}
+
+		if password != string(confirmBytes) {
+			log.Fatal("Passwords do not match")
+		}
+	} else {
+		// Non-interactive mode: read from pipe/stdin
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatalf("Failed to read password from stdin: %v", err)
+		}
+		password = strings.TrimSpace(line)
+	}
+
+	if password == "" {
+		log.Fatal("Password cannot be empty")
+	}
+
+	// Get database path from environment or use default
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		// Load from config if available
+		cfg, err := config.Load("")
+		if err == nil && cfg.Database.Path != "" {
+			dbPath = cfg.Database.Path
+		} else {
+			dbPath = "./swoops.db"
+		}
+	}
+
+	// Open database
+	s, err := store.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+
+	// Create admin user
+	req := &models.CreateUserRequest{
+		Username: username,
+		Email:    email,
+		Password: password,
+		FullName: "Administrator",
+		IsAdmin:  true,
+	}
+
+	user, err := s.CreateUser(req)
+	if err != nil {
+		log.Fatalf("Failed to create user: %v", err)
+	}
+
+	fmt.Printf("✓ Admin user created successfully!\n")
+	fmt.Printf("  ID:       %s\n", user.ID)
+	fmt.Printf("  Username: %s\n", user.Username)
+	fmt.Printf("  Email:    %s\n", user.Email)
+	fmt.Printf("  Is Admin: %v\n", user.IsAdmin)
+	fmt.Printf("  Created:  %s\n", user.CreatedAt.Format(time.RFC3339))
+	fmt.Printf("\nYou can now login at the web interface with these credentials.\n")
 }
