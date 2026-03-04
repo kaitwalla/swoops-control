@@ -82,7 +82,7 @@ generate_random_key() {
 
 # Banner
 echo -e "${GREEN}"
-cat << "EOF"
+cat <<EOF
    ____
   / _____|_      _____   ___  _ __  ___
   \___ \ \ \ /\ / / _ \ / _ \| '_ \/ __|
