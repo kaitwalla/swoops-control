@@ -406,19 +406,27 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             # Generate a random password for the CA
             CA_PASSWORD=$(generate_random_key)
 
+            # Create temporary password file for initialization
+            TEMP_PASS_FILE=$(mktemp)
+            echo "$CA_PASSWORD" > "$TEMP_PASS_FILE"
+            chmod 600 "$TEMP_PASS_FILE"
+
             # Initialize CA non-interactively
             sudo STEPPATH="$STEP_CA_DIR" step ca init \
                 --name="Swoops Internal CA" \
                 --dns="localhost" \
                 --address=":9000" \
                 --provisioner="admin" \
-                --password-file=<(echo "$CA_PASSWORD") \
+                --password-file="$TEMP_PASS_FILE" \
                 --deployment-type=standalone \
                 --acme
 
-            # Store the password securely
+            # Store the password securely in the CA directory
             echo "$CA_PASSWORD" | sudo tee "$STEP_CA_DIR/.ca-password" > /dev/null
             sudo chmod 600 "$STEP_CA_DIR/.ca-password"
+
+            # Clean up temporary password file
+            rm -f "$TEMP_PASS_FILE"
 
             success "step-ca initialized"
 
