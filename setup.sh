@@ -226,22 +226,31 @@ echo
 # Step 2: Deployment type (if installing server)
 if [ "$INSTALL_SERVER" = true ]; then
     echo -e "${GREEN}Step 2: Deployment Type${NC}"
-    echo "  1) Production with reverse proxy (Caddy/nginx) - Recommended"
-    echo "  2) Direct deployment with manual TLS"
-    echo "  3) Development (HTTP only, no TLS)"
-    prompt DEPLOY_TYPE "Deployment type [1-3]" "1"
+    echo "  1) Automatic HTTPS (built-in Let's Encrypt) - Easiest!"
+    echo "  2) Production with reverse proxy (Caddy/nginx)"
+    echo "  3) Direct deployment with manual TLS"
+    echo "  4) Development (HTTP only, no TLS)"
+    prompt DEPLOY_TYPE "Deployment type [1-4]" "1"
     echo
 
     case $DEPLOY_TYPE in
         1)
+            USE_AUTOCERT=true
+            USE_REVERSE_PROXY=false
+            USE_TLS=false
+            ;;
+        2)
+            USE_AUTOCERT=false
             USE_REVERSE_PROXY=true
             USE_TLS=false  # Reverse proxy handles TLS
             ;;
-        2)
+        3)
+            USE_AUTOCERT=false
             USE_REVERSE_PROXY=false
             USE_TLS=true
             ;;
-        3)
+        4)
+            USE_AUTOCERT=false
             USE_REVERSE_PROXY=false
             USE_TLS=false
             warn "Development mode - not suitable for production!"
@@ -256,7 +265,13 @@ if [ "$INSTALL_SERVER" = true ]; then
 
     prompt DOMAIN "Domain name" "swoops.example.com"
 
-    if [ "$USE_REVERSE_PROXY" = true ]; then
+    if [ "$USE_AUTOCERT" = true ]; then
+        prompt HTTP_HOST "HTTP server bind address" "0.0.0.0"
+        prompt HTTP_PORT "HTTPS server port" "443"
+        prompt AUTOCERT_EMAIL "Email for Let's Encrypt notifications (optional)" ""
+        EXTERNAL_URL="https://$DOMAIN"
+        info "Autocert will also listen on port 80 for ACME challenges"
+    elif [ "$USE_REVERSE_PROXY" = true ]; then
         prompt HTTP_HOST "HTTP server bind address (internal)" "127.0.0.1"
         prompt HTTP_PORT "HTTP server port (internal)" "8080"
         EXTERNAL_URL="https://$DOMAIN"
@@ -824,15 +839,28 @@ server:
     - $EXTERNAL_URL
 EOF
 
-    if [ "$USE_TLS" = true ]; then
+    if [ "$USE_AUTOCERT" = true ]; then
+        cat >> "$SERVER_CONFIG" <<EOF
+  tls_enabled: false
+  autocert_enabled: true
+  autocert_domain: $DOMAIN
+EOF
+        if [ -n "$AUTOCERT_EMAIL" ]; then
+            cat >> "$SERVER_CONFIG" <<EOF
+  autocert_email: $AUTOCERT_EMAIL
+EOF
+        fi
+    elif [ "$USE_TLS" = true ]; then
         cat >> "$SERVER_CONFIG" <<EOF
   tls_enabled: true
   tls_cert: $HTTP_CERT_PATH
   tls_key: $HTTP_KEY_PATH
+  autocert_enabled: false
 EOF
     else
         cat >> "$SERVER_CONFIG" <<EOF
   tls_enabled: false
+  autocert_enabled: false
 EOF
     fi
 
@@ -1314,8 +1342,13 @@ if [ "$INSTALL_SERVER" = true ]; then
     echo "  External URL: $EXTERNAL_URL"
     echo "  API Key: $API_KEY"
     echo "  Database: $DB_PATH"
-    if [ "$USE_REVERSE_PROXY" = true ]; then
+    if [ "$USE_AUTOCERT" = true ]; then
+        echo "  HTTPS: Automatic (Let's Encrypt for $DOMAIN)"
+        echo "  Ports: 443 (HTTPS), 80 (HTTP redirect + ACME challenges)"
+    elif [ "$USE_REVERSE_PROXY" = true ]; then
         echo "  Reverse Proxy: Yes (configure $PROXY_TYPE)"
+    elif [ "$USE_TLS" = true ]; then
+        echo "  HTTPS: Manual TLS"
     fi
     if [ "$GRPC_TLS_ENABLED" = true ]; then
         echo "  gRPC TLS: Yes (mTLS: $GRPC_MTLS_ENABLED)"
@@ -1337,17 +1370,24 @@ fi
 echo -e "${BLUE}Next Steps:${NC}"
 if [ "$INSTALL_SERVER" = true ]; then
     echo "  1. Review configuration: cat $SERVER_CONFIG"
-    if [ "$USE_REVERSE_PROXY" = true ]; then
+    if [ "$USE_AUTOCERT" = true ]; then
+        echo "  2. Ensure ports 80 and 443 are open in your firewall"
+        echo "  3. Ensure DNS for $DOMAIN points to this server's IP"
+        echo "  4. Start server: sudo systemctl start swoopsd"
+        echo "     (Let's Encrypt certificate will be obtained automatically on first request)"
+    elif [ "$USE_REVERSE_PROXY" = true ]; then
         if [ "$PROXY_TYPE" = "1" ]; then
             echo "  2. Start Caddy: sudo caddy run --config $CONFIG_DIR/Caddyfile"
         elif [ "$PROXY_TYPE" = "2" ]; then
             echo "  2. Configure nginx and run certbot"
         fi
+        echo "  3. Start server: sudo systemctl start swoopsd"
+    else
+        echo "  2. Start server: sudo systemctl start swoopsd"
     fi
-    echo "  3. Start server: sudo systemctl start swoopsd"
-    echo "  4. Check logs: sudo journalctl -u swoopsd -f"
-    echo "  5. Access UI: $EXTERNAL_URL"
-    echo "  6. Register hosts via API or Web UI"
+    echo "  5. Check logs: sudo journalctl -u swoopsd -f"
+    echo "  6. Access UI: $EXTERNAL_URL"
+    echo "  7. Register hosts via API or Web UI"
 fi
 
 if [ "$INSTALL_AGENT" = true ]; then
