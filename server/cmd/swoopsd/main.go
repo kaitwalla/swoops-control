@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -256,54 +256,118 @@ func performUpdate() error {
 	}
 	log.Printf("Current executable: %s", exePath)
 
-	// Find git repository root by walking up from executable
-	gitRoot, err := findGitRoot(exePath)
+	// Detect architecture
+	arch := os.Getenv("GOARCH")
+	if arch == "" {
+		// Fallback to runtime detection
+		arch = "amd64" // Default, could use runtime.GOARCH
+		cmd := exec.Command("uname", "-m")
+		if output, err := cmd.Output(); err == nil {
+			machine := string(output[:len(output)-1]) // trim newline
+			if machine == "x86_64" {
+				arch = "amd64"
+			} else if machine == "aarch64" || machine == "arm64" {
+				arch = "arm64"
+			}
+		}
+	}
+
+	// Detect OS
+	goos := os.Getenv("GOOS")
+	if goos == "" {
+		goos = "linux" // Default for production
+		cmd := exec.Command("uname", "-s")
+		if output, err := cmd.Output(); err == nil {
+			osName := string(output[:len(output)-1]) // trim newline
+			if osName == "Linux" {
+				goos = "linux"
+			} else if osName == "Darwin" {
+				goos = "darwin"
+			}
+		}
+	}
+
+	// Fetch latest release from GitHub
+	log.Println("Fetching latest release information...")
+	githubRepo := "kaitwalla/swoops-control"
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
+
+	resp, err := http.Get(apiURL)
 	if err != nil {
-		return fmt.Errorf("find git root: %w", err)
+		return fmt.Errorf("fetch latest release: %w", err)
 	}
-	log.Printf("Git repository: %s", gitRoot)
+	defer resp.Body.Close()
 
-	// Pull latest changes
-	log.Println("Pulling latest changes from git...")
-	cmd := exec.Command("git", "pull")
-	cmd.Dir = gitRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git pull: %w", err)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("github API returned %d", resp.StatusCode)
 	}
 
-	// Rebuild the binary
-	log.Println("Rebuilding swoopsd...")
-	buildCmd := exec.Command("go", "build", "-o", exePath, "./server/cmd/swoopsd")
-	buildCmd.Dir = gitRoot
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("build: %w", err)
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return fmt.Errorf("parse release info: %w", err)
 	}
 
-	log.Println("✓ Update complete! Please restart swoopsd for changes to take effect.")
+	log.Printf("Latest version: %s", release.TagName)
+
+	// Download binary
+	binaryName := fmt.Sprintf("swoopsd-%s-%s", goos, arch)
+	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", githubRepo, release.TagName, binaryName)
+
+	log.Printf("Downloading from %s...", downloadURL)
+	resp, err = http.Get(downloadURL)
+	if err != nil {
+		return fmt.Errorf("download binary: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	// Write to temporary file
+	tempFile, err := os.CreateTemp("", "swoopsd-update-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+
+	if err := os.WriteFile(tempPath, []byte{}, 0755); err != nil {
+		return fmt.Errorf("prepare temp file: %w", err)
+	}
+
+	file, err := os.OpenFile(tempPath, os.O_WRONLY, 0755)
+	if err != nil {
+		return fmt.Errorf("open temp file: %w", err)
+	}
+
+	_, err = file.ReadFrom(resp.Body)
+	file.Close()
+	if err != nil {
+		return fmt.Errorf("write binary: %w", err)
+	}
+
+	// Make executable
+	if err := os.Chmod(tempPath, 0755); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+
+	// Replace current binary
+	log.Printf("Installing to %s...", exePath)
+	if err := os.Rename(tempPath, exePath); err != nil {
+		// If rename fails (cross-device link), try copy
+		input, err := os.ReadFile(tempPath)
+		if err != nil {
+			return fmt.Errorf("read temp file: %w", err)
+		}
+		if err := os.WriteFile(exePath, input, 0755); err != nil {
+			return fmt.Errorf("write binary: %w", err)
+		}
+	}
+
+	log.Println("✓ Update complete! Restart swoopsd for changes to take effect:")
 	log.Println("  sudo systemctl restart swoopsd")
 	return nil
-}
-
-func findGitRoot(startPath string) (string, error) {
-	dir := startPath
-	if stat, err := os.Stat(dir); err == nil && !stat.IsDir() {
-		dir = filepath.Dir(dir)
-	}
-
-	for {
-		gitDir := filepath.Join(dir, ".git")
-		if stat, err := os.Stat(gitDir); err == nil && stat.IsDir() {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("git repository not found")
-		}
-		dir = parent
-	}
 }
