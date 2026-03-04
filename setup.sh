@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.0.9"
+SETUP_SCRIPT_VERSION="1.1.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -96,6 +96,75 @@ echo -e "${NC}"
 
 info "This script will help you configure Swoops for production deployment."
 echo
+
+# Check if swoopsd is already installed
+if command -v swoopsd &> /dev/null; then
+    SWOOPSD_PATH=$(which swoopsd)
+    SWOOPSD_VERSION=$(swoopsd --version 2>/dev/null | head -1 || echo "unknown")
+
+    echo -e "${YELLOW}⚠${NC} Swoops is already installed at: $SWOOPSD_PATH"
+    echo "  Current version: $SWOOPSD_VERSION"
+    echo
+
+    if confirm "Would you like to update to the latest version instead of running full setup?" "y"; then
+        info "Updating swoopsd..."
+
+        # Try using built-in update command first
+        if swoopsd --update 2>/dev/null; then
+            success "Update complete!"
+            echo
+            info "To apply the update, restart swoopsd:"
+            echo "  sudo systemctl restart swoopsd"
+            exit 0
+        else
+            # Fallback to manual update
+            warn "Built-in update failed, trying manual update..."
+
+            # Find git root from executable
+            SWOOPSD_DIR=$(dirname "$SWOOPSD_PATH")
+            GIT_ROOT=""
+
+            # Search for git root
+            for dir in "$SWOOPSD_DIR" "$SWOOPSD_DIR/.." "$SWOOPSD_DIR/../.." /root/swoops-control /opt/swoops $(pwd); do
+                if [ -d "$dir/.git" ]; then
+                    GIT_ROOT=$(cd "$dir" && pwd)
+                    break
+                fi
+            done
+
+            if [ -z "$GIT_ROOT" ]; then
+                error "Could not find git repository. Please run full setup or update manually."
+                exit 1
+            fi
+
+            info "Found git repository at: $GIT_ROOT"
+
+            # Pull and rebuild
+            cd "$GIT_ROOT"
+            info "Pulling latest changes..."
+            git pull origin main || {
+                error "Failed to pull latest changes"
+                exit 1
+            }
+
+            info "Rebuilding swoopsd..."
+            make build || {
+                error "Failed to build swoopsd"
+                exit 1
+            }
+
+            success "Update complete!"
+            echo
+            info "To apply the update, restart swoopsd:"
+            echo "  sudo systemctl restart swoopsd"
+            exit 0
+        fi
+    fi
+
+    echo
+    info "Continuing with full setup..."
+    echo
+fi
 
 # Detect OS
 OS="unknown"
