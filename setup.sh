@@ -304,7 +304,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             fi
 
             # Install step CLI based on OS
-            STEP_VERSION="0.27.5"
+            STEP_VERSION="0.29.0"
 
             if [ "$OS" = "macos" ]; then
                 # macOS installation
@@ -323,7 +323,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                 if command -v apt-get &> /dev/null; then
                     # Debian/Ubuntu
                     info "Downloading step CLI for Debian/Ubuntu..."
-                    STEP_URL="https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.deb"
+                    STEP_URL="https://dl.smallstep.com/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}-1_${STEP_ARCH}.deb"
 
                     if command -v curl &> /dev/null; then
                         if ! curl -fsSL "$STEP_URL" -o /tmp/step-cli.deb; then
@@ -353,7 +353,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                     command -v dnf &> /dev/null && PKG_MGR="dnf"
 
                     info "Downloading step CLI for RHEL/CentOS/Fedora..."
-                    STEP_URL="https://dl.step.sm/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}_${STEP_ARCH}.rpm"
+                    STEP_URL="https://dl.smallstep.com/gh-release/cli/gh-release-header/v${STEP_VERSION}/step-cli_${STEP_VERSION}-1_${STEP_ARCH}.rpm"
 
                     if command -v curl &> /dev/null; then
                         if ! curl -fsSL "$STEP_URL" -o /tmp/step-cli.rpm; then
