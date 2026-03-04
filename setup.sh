@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.0.8"
+SETUP_SCRIPT_VERSION="1.0.9"
 
 # Colors for output
 RED='\033[0;31m'
@@ -511,6 +511,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
             --not-after 8760h \
             --ca "$STEP_CA_DIR/certs/root_ca.crt" \
             --ca-key "$STEP_CA_DIR/secrets/root_ca_key" \
+            --ca-password-file "$STEP_CA_DIR/.ca-password" \
             --no-password \
             --insecure \
             --san "$DOMAIN" \
@@ -538,6 +539,7 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
                 --not-after 8760h \
                 --ca "$STEP_CA_DIR/certs/root_ca.crt" \
                 --ca-key "$STEP_CA_DIR/secrets/root_ca_key" \
+                --ca-password-file "$STEP_CA_DIR/.ca-password" \
                 --no-password \
                 --insecure
 
