@@ -3,6 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
+SETUP_SCRIPT_VERSION="1.0.5"
 
 # Colors for output
 RED='\033[0;31m'
@@ -89,6 +90,7 @@ cat << "EOF"
   |____/   \_/\_/ \___/ \___/| .__/|___/
                               |_|
   Interactive Setup Script
+  Version $SETUP_SCRIPT_VERSION
 EOF
 echo -e "${NC}"
 
@@ -480,8 +482,12 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
 
         # Generate gRPC server certificate
         info "Generating gRPC server certificate..."
+        info "Domain: $DOMAIN"
         # Use temporary location first, then move with sudo
         TEMP_CERT_DIR=$(mktemp -d)
+
+        # Debug: show the actual command
+        echo "Running: step ca certificate \"$DOMAIN\" \"$TEMP_CERT_DIR/grpc-server-cert.pem\" \"$TEMP_CERT_DIR/grpc-server-key.pem\" --provisioner=admin --ca-url=https://localhost:9000 --root=\"$STEP_CA_DIR/certs/root_ca.crt\" --not-after=8760h --insecure" >&2
 
         STEPPATH="$STEP_CA_DIR" step ca certificate "$DOMAIN" \
             "$TEMP_CERT_DIR/grpc-server-cert.pem" \
