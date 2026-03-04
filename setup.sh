@@ -474,28 +474,47 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         # Set STEPPATH for certificate operations
         export STEPPATH="$STEP_CA_DIR"
 
+        # Ensure cert directory exists and is writable
+        sudo mkdir -p "$CERT_DIR"
+        sudo chmod 755 "$CERT_DIR"
+
         # Generate gRPC server certificate
         info "Generating gRPC server certificate..."
-        sudo STEPPATH="$STEP_CA_DIR" step ca certificate "$DOMAIN" \
-            "$CERT_DIR/grpc-server-cert.pem" \
-            "$CERT_DIR/grpc-server-key.pem" \
-            --provisioner admin \
-            --ca-url https://localhost:9000 \
-            --root "$STEP_CA_DIR/certs/root_ca.crt" \
-            --not-after 8760h \
+        # Use temporary location first, then move with sudo
+        TEMP_CERT_DIR=$(mktemp -d)
+
+        STEPPATH="$STEP_CA_DIR" step ca certificate "$DOMAIN" \
+            "$TEMP_CERT_DIR/grpc-server-cert.pem" \
+            "$TEMP_CERT_DIR/grpc-server-key.pem" \
+            --provisioner=admin \
+            --ca-url=https://localhost:9000 \
+            --root="$STEP_CA_DIR/certs/root_ca.crt" \
+            --not-after=8760h \
             --insecure
+
+        # Move certificates to final location
+        sudo mv "$TEMP_CERT_DIR/grpc-server-cert.pem" "$CERT_DIR/grpc-server-cert.pem"
+        sudo mv "$TEMP_CERT_DIR/grpc-server-key.pem" "$CERT_DIR/grpc-server-key.pem"
+        rmdir "$TEMP_CERT_DIR"
 
         # Generate agent client certificates if mTLS enabled
         if [ "$GRPC_MTLS_ENABLED" = true ] || [ "$AGENT_MTLS_ENABLED" = true ]; then
             info "Generating agent client certificate..."
-            sudo STEPPATH="$STEP_CA_DIR" step ca certificate "swoops-agent" \
-                "$CERT_DIR/agent-cert.pem" \
-                "$CERT_DIR/agent-key.pem" \
-                --provisioner admin \
-                --ca-url https://localhost:9000 \
-                --root "$STEP_CA_DIR/certs/root_ca.crt" \
-                --not-after 8760h \
+            TEMP_CERT_DIR=$(mktemp -d)
+
+            STEPPATH="$STEP_CA_DIR" step ca certificate "swoops-agent" \
+                "$TEMP_CERT_DIR/agent-cert.pem" \
+                "$TEMP_CERT_DIR/agent-key.pem" \
+                --provisioner=admin \
+                --ca-url=https://localhost:9000 \
+                --root="$STEP_CA_DIR/certs/root_ca.crt" \
+                --not-after=8760h \
                 --insecure
+
+            # Move certificates to final location
+            sudo mv "$TEMP_CERT_DIR/agent-cert.pem" "$CERT_DIR/agent-cert.pem"
+            sudo mv "$TEMP_CERT_DIR/agent-key.pem" "$CERT_DIR/agent-key.pem"
+            rmdir "$TEMP_CERT_DIR"
         fi
 
         # Copy root CA certificate
