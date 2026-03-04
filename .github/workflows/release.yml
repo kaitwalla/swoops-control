@@ -17,6 +17,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -25,6 +30,15 @@ jobs:
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build web frontend
+        run: |
+          cd web
+          npm install
+          npm run build
+          cd ..
+          rm -rf server/internal/frontend/dist
+          cp -r web/dist server/internal/frontend/dist
 
       - name: Build binaries
         run: |
