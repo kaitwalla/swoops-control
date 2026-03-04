@@ -82,11 +82,16 @@ func (c *Config) Validate() error {
 		}
 		// Set default cache directory if not specified
 		if c.Server.AutocertCacheDir == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("failed to get home directory for autocert cache: %w", err)
+			// Use /var/cache for system services, ~/.cache for user installations
+			// Check if we're running as root or a system user (no HOME or HOME=/nonexistent)
+			homeDir := os.Getenv("HOME")
+			if homeDir == "" || homeDir == "/" || homeDir == "/nonexistent" || homeDir == "/var/empty" {
+				// System service - use /var/cache
+				c.Server.AutocertCacheDir = "/var/cache/swoops/autocert"
+			} else {
+				// User installation - use ~/.cache
+				c.Server.AutocertCacheDir = filepath.Join(homeDir, ".cache", "swoops", "autocert")
 			}
-			c.Server.AutocertCacheDir = filepath.Join(homeDir, ".cache", "swoops", "autocert")
 		}
 		log.Printf("Automatic HTTPS enabled for domain: %s", c.Server.AutocertDomain)
 		log.Printf("Certificates will be cached in: %s", c.Server.AutocertCacheDir)

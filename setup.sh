@@ -1224,6 +1224,13 @@ EOF
             sudo mkdir -p /opt/swoops "$(dirname "$DB_PATH")"
             sudo chown -R swoops:swoops /opt/swoops "$(dirname "$DB_PATH")"
 
+            # Create autocert cache directory if autocert is enabled
+            if [ "$USE_AUTOCERT" = true ]; then
+                sudo mkdir -p /var/cache/swoops/autocert
+                sudo chown -R swoops:swoops /var/cache/swoops
+                sudo chmod 700 /var/cache/swoops/autocert
+            fi
+
             sudo systemctl daemon-reload
             info "To start: sudo systemctl start swoopsd"
             info "To enable on boot: sudo systemctl enable swoopsd"
