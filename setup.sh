@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.1.0"
+SETUP_SCRIPT_VERSION="1.2.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -109,56 +109,78 @@ if command -v swoopsd &> /dev/null; then
     if confirm "Would you like to update to the latest version instead of running full setup?" "y"; then
         info "Updating swoopsd..."
 
-        # Try using built-in update command first
-        if swoopsd --update 2>/dev/null; then
-            success "Update complete!"
-            echo
-            info "To apply the update, restart swoopsd:"
-            echo "  sudo systemctl restart swoopsd"
-            exit 0
+        # Download latest release from GitHub
+        GITHUB_REPO="kaitwalla/swoops-control"
+
+        # Detect architecture
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+            BINARY_ARCH="amd64"
+        elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            BINARY_ARCH="arm64"
         else
-            # Fallback to manual update
-            warn "Built-in update failed, trying manual update..."
+            error "Unsupported architecture: $ARCH"
+            exit 1
+        fi
 
-            # Find git root from executable
-            SWOOPSD_DIR=$(dirname "$SWOOPSD_PATH")
-            GIT_ROOT=""
+        # Detect OS
+        if [ "$OS" = "linux" ]; then
+            BINARY_OS="linux"
+        elif [ "$OS" = "macos" ]; then
+            BINARY_OS="darwin"
+        else
+            error "Unsupported OS: $OS"
+            exit 1
+        fi
 
-            # Search for git root
-            for dir in "$SWOOPSD_DIR" "$SWOOPSD_DIR/.." "$SWOOPSD_DIR/../.." /root/swoops-control /opt/swoops $(pwd); do
-                if [ -d "$dir/.git" ]; then
-                    GIT_ROOT=$(cd "$dir" && pwd)
-                    break
-                fi
-            done
+        # Get latest release info
+        info "Fetching latest release information..."
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/$GITHUB_REPO/releases/latest)
+        LATEST_VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
-            if [ -z "$GIT_ROOT" ]; then
-                error "Could not find git repository. Please run full setup or update manually."
+        if [ -z "$LATEST_VERSION" ]; then
+            error "Could not fetch latest release information"
+            exit 1
+        fi
+
+        info "Latest version: $LATEST_VERSION"
+
+        # Download binary
+        BINARY_NAME="swoopsd-${BINARY_OS}-${BINARY_ARCH}"
+        DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$LATEST_VERSION/$BINARY_NAME"
+
+        info "Downloading from $DOWNLOAD_URL..."
+        TEMP_BINARY=$(mktemp)
+
+        if command -v curl &> /dev/null; then
+            if ! curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_BINARY"; then
+                error "Failed to download binary from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
                 exit 1
             fi
-
-            info "Found git repository at: $GIT_ROOT"
-
-            # Pull and rebuild
-            cd "$GIT_ROOT"
-            info "Pulling latest changes..."
-            git pull origin main || {
-                error "Failed to pull latest changes"
+        elif command -v wget &> /dev/null; then
+            if ! wget -q "$DOWNLOAD_URL" -O "$TEMP_BINARY"; then
+                error "Failed to download binary from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
                 exit 1
-            }
-
-            info "Rebuilding swoopsd..."
-            make build || {
-                error "Failed to build swoopsd"
-                exit 1
-            }
-
-            success "Update complete!"
-            echo
-            info "To apply the update, restart swoopsd:"
-            echo "  sudo systemctl restart swoopsd"
-            exit 0
+            fi
+        else
+            error "Neither curl nor wget found. Please install one of them first."
+            exit 1
         fi
+
+        # Make binary executable
+        chmod +x "$TEMP_BINARY"
+
+        # Replace existing binary
+        info "Installing new binary to $SWOOPSD_PATH..."
+        sudo mv "$TEMP_BINARY" "$SWOOPSD_PATH"
+
+        success "Update complete! Updated to $LATEST_VERSION"
+        echo
+        info "To apply the update, restart swoopsd:"
+        echo "  sudo systemctl restart swoopsd"
+        exit 0
     fi
 
     echo
@@ -982,8 +1004,133 @@ EOF
     echo
 fi
 
-# Step 8: Service installation
-echo -e "${GREEN}Step 8: Service Installation${NC}"
+# Step 8: Download and Install Binaries
+echo -e "${GREEN}Step 8: Download and Install Binaries${NC}"
+
+# Check if binaries are already installed
+NEED_SERVER_BINARY=false
+NEED_AGENT_BINARY=false
+
+if [ "$INSTALL_SERVER" = true ]; then
+    if ! command -v swoopsd &> /dev/null; then
+        NEED_SERVER_BINARY=true
+    else
+        info "swoopsd already installed at $(which swoopsd)"
+    fi
+fi
+
+if [ "$INSTALL_AGENT" = true ]; then
+    if ! command -v swoops-agent &> /dev/null; then
+        NEED_AGENT_BINARY=true
+    else
+        info "swoops-agent already installed at $(which swoops-agent)"
+    fi
+fi
+
+if [ "$NEED_SERVER_BINARY" = true ] || [ "$NEED_AGENT_BINARY" = true ]; then
+    GITHUB_REPO="kaitwalla/swoops-control"
+
+    # Detect architecture
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        BINARY_ARCH="amd64"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        BINARY_ARCH="arm64"
+    else
+        error "Unsupported architecture: $ARCH"
+        exit 1
+    fi
+
+    # Detect OS
+    if [ "$OS" = "linux" ]; then
+        BINARY_OS="linux"
+    elif [ "$OS" = "macos" ]; then
+        BINARY_OS="darwin"
+    else
+        error "Unsupported OS: $OS"
+        exit 1
+    fi
+
+    # Get latest release info
+    info "Fetching latest release information from GitHub..."
+    LATEST_RELEASE=$(curl -s https://api.github.com/repos/$GITHUB_REPO/releases/latest)
+    LATEST_VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+    if [ -z "$LATEST_VERSION" ]; then
+        error "Could not fetch latest release information"
+        exit 1
+    fi
+
+    info "Latest version: $LATEST_VERSION"
+
+    # Download server binary
+    if [ "$NEED_SERVER_BINARY" = true ]; then
+        BINARY_NAME="swoopsd-${BINARY_OS}-${BINARY_ARCH}"
+        DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$LATEST_VERSION/$BINARY_NAME"
+
+        info "Downloading swoopsd from $DOWNLOAD_URL..."
+        TEMP_BINARY=$(mktemp)
+
+        if command -v curl &> /dev/null; then
+            if ! curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_BINARY"; then
+                error "Failed to download swoopsd from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        elif command -v wget &> /dev/null; then
+            if ! wget -q "$DOWNLOAD_URL" -O "$TEMP_BINARY"; then
+                error "Failed to download swoopsd from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        else
+            error "Neither curl nor wget found. Please install one of them first."
+            exit 1
+        fi
+
+        chmod +x "$TEMP_BINARY"
+        sudo mv "$TEMP_BINARY" /usr/local/bin/swoopsd
+        success "Installed swoopsd to /usr/local/bin/swoopsd"
+    fi
+
+    # Download agent binary
+    if [ "$NEED_AGENT_BINARY" = true ]; then
+        BINARY_NAME="swoops-agent-${BINARY_OS}-${BINARY_ARCH}"
+        DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$LATEST_VERSION/$BINARY_NAME"
+
+        info "Downloading swoops-agent from $DOWNLOAD_URL..."
+        TEMP_BINARY=$(mktemp)
+
+        if command -v curl &> /dev/null; then
+            if ! curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_BINARY"; then
+                error "Failed to download swoops-agent from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        elif command -v wget &> /dev/null; then
+            if ! wget -q "$DOWNLOAD_URL" -O "$TEMP_BINARY"; then
+                error "Failed to download swoops-agent from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        else
+            error "Neither curl nor wget found. Please install one of them first."
+            exit 1
+        fi
+
+        chmod +x "$TEMP_BINARY"
+        sudo mv "$TEMP_BINARY" /usr/local/bin/swoops-agent
+        success "Installed swoops-agent to /usr/local/bin/swoops-agent"
+    fi
+
+    echo
+else
+    info "Binaries already installed, skipping download"
+    echo
+fi
+
+# Step 9: Service installation
+echo -e "${GREEN}Step 9: Service Installation${NC}"
 
 if confirm "Install as system service?" "y"; then
     if [ "$INSTALL_SERVER" = true ]; then
