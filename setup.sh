@@ -200,6 +200,9 @@ if command -v swoopsd &> /dev/null; then
     echo
     info "Continuing with full setup..."
     echo
+
+    # When continuing with full setup, mark that binaries need to be downloaded
+    FORCE_DOWNLOAD_BINARIES=true
 fi
 
 info "Detected OS: $OS ($INIT_SYSTEM)"
@@ -1052,19 +1055,30 @@ echo -e "${GREEN}Step 8: Download and Install Binaries${NC}"
 NEED_SERVER_BINARY=false
 NEED_AGENT_BINARY=false
 
-if [ "$INSTALL_SERVER" = true ]; then
-    if ! command -v swoopsd &> /dev/null; then
+# If continuing full setup after declining quick update, force download
+if [ "$FORCE_DOWNLOAD_BINARIES" = true ]; then
+    info "Re-running setup detected - will download latest binaries"
+    if [ "$INSTALL_SERVER" = true ]; then
         NEED_SERVER_BINARY=true
-    else
-        info "swoopsd already installed at $(which swoopsd)"
     fi
-fi
-
-if [ "$INSTALL_AGENT" = true ]; then
-    if ! command -v swoops-agent &> /dev/null; then
+    if [ "$INSTALL_AGENT" = true ]; then
         NEED_AGENT_BINARY=true
-    else
-        info "swoops-agent already installed at $(which swoops-agent)"
+    fi
+else
+    if [ "$INSTALL_SERVER" = true ]; then
+        if ! command -v swoopsd &> /dev/null; then
+            NEED_SERVER_BINARY=true
+        else
+            info "swoopsd already installed at $(which swoopsd)"
+        fi
+    fi
+
+    if [ "$INSTALL_AGENT" = true ]; then
+        if ! command -v swoops-agent &> /dev/null; then
+            NEED_AGENT_BINARY=true
+        else
+            info "swoops-agent already installed at $(which swoops-agent)"
+        fi
     fi
 fi
 
