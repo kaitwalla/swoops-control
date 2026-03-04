@@ -23,6 +23,7 @@ import (
 	"github.com/kaitwalla/swoops-control/server/internal/api"
 	"github.com/kaitwalla/swoops-control/server/internal/config"
 	"github.com/kaitwalla/swoops-control/server/internal/store"
+	"golang.org/x/crypto/acme/autocert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -78,6 +79,27 @@ func main() {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
+	}
+
+	// Configure autocert if enabled
+	var autocertManager *autocert.Manager
+	if cfg.Server.AutocertEnabled {
+		// Create cache directory if it doesn't exist
+		if err := os.MkdirAll(cfg.Server.AutocertCacheDir, 0700); err != nil {
+			log.Fatalf("Failed to create autocert cache directory: %v", err)
+		}
+
+		autocertManager = &autocert.Manager{
+			Prompt:      autocert.AcceptTOS,
+			HostPolicy:  autocert.HostWhitelist(cfg.Server.AutocertDomain),
+			Cache:       autocert.DirCache(cfg.Server.AutocertCacheDir),
+		}
+		if cfg.Server.AutocertEmail != "" {
+			autocertManager.Email = cfg.Server.AutocertEmail
+		}
+
+		httpServer.TLSConfig = autocertManager.TLSConfig()
+		log.Printf("Autocert configured for domain: %s (cache: %s)", cfg.Server.AutocertDomain, cfg.Server.AutocertCacheDir)
 	}
 
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
@@ -151,14 +173,38 @@ func main() {
 		}
 	}()
 
+	// Start HTTP redirect server for autocert (handles ACME challenges on port 80)
+	var httpRedirectServer *http.Server
+	if cfg.Server.AutocertEnabled {
+		httpRedirectServer = &http.Server{
+			Addr:    ":80",
+			Handler: autocertManager.HTTPHandler(http.HandlerFunc(redirectToHTTPS)),
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		}
+		go func() {
+			log.Printf("HTTP redirect server starting on :80 (for ACME challenges and HTTPS redirect)")
+			if err := httpRedirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("HTTP redirect server error: %v", err)
+			}
+		}()
+	}
+
+	// Start main HTTP(S) server
 	go func() {
-		if cfg.Server.TLSEnabled {
-			log.Printf("Swoops control plane starting on https://%s (TLS enabled)", addr)
+		if cfg.Server.AutocertEnabled {
+			log.Printf("Swoops control plane starting on https://%s (automatic HTTPS via Let's Encrypt)", addr)
+			if err := httpServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("HTTPS server error: %v", err)
+			}
+		} else if cfg.Server.TLSEnabled {
+			log.Printf("Swoops control plane starting on https://%s (manual TLS)", addr)
 			if err := httpServer.ListenAndServeTLS(cfg.Server.TLSCert, cfg.Server.TLSKey); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("HTTPS server error: %v", err)
 			}
 		} else {
-			log.Printf("Swoops control plane starting on http://%s (TLS disabled)", addr)
+			log.Printf("Swoops control plane starting on http://%s (TLS disabled - development only)", addr)
 			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("HTTP server error: %v", err)
 			}
@@ -181,9 +227,23 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
+	if httpRedirectServer != nil {
+		if err := httpRedirectServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP redirect server shutdown error: %v", err)
+		}
+	}
 	grpcServer.GracefulStop()
 
 	log.Println("Swoops control plane stopped")
+}
+
+// redirectToHTTPS redirects HTTP requests to HTTPS
+func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
+	target := "https://" + r.Host + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }
 
 func performUpdate() error {

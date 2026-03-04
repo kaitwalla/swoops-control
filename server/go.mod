@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/kaitwalla/swoops-control/pkg v0.0.0
 	github.com/prometheus/client_golang v1.23.2
+	golang.org/x/crypto v0.48.0
 	google.golang.org/grpc v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
@@ -27,7 +28,6 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect

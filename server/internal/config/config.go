@@ -24,9 +24,17 @@ type ServerConfig struct {
 	Port           int      `yaml:"port"`
 	ExternalURL    string   `yaml:"external_url"` // Public URL for remote agents to connect (e.g., https://swoops.example.com:8080)
 	AllowedOrigins []string `yaml:"allowed_origins"`
+
+	// Manual TLS configuration
 	TLSCert        string   `yaml:"tls_cert"`  // Path to TLS certificate file for HTTPS
 	TLSKey         string   `yaml:"tls_key"`   // Path to TLS private key file for HTTPS
-	TLSEnabled     bool     `yaml:"tls_enabled"` // Enable HTTPS (production recommended)
+	TLSEnabled     bool     `yaml:"tls_enabled"` // Enable HTTPS with manual certificates (production recommended)
+
+	// Automatic HTTPS with Let's Encrypt (recommended for production)
+	AutocertEnabled bool     `yaml:"autocert_enabled"` // Enable automatic HTTPS with Let's Encrypt
+	AutocertDomain  string   `yaml:"autocert_domain"`  // Domain name for Let's Encrypt (e.g., swoops.example.com)
+	AutocertEmail   string   `yaml:"autocert_email"`   // Email for Let's Encrypt notifications (optional but recommended)
+	AutocertCacheDir string  `yaml:"autocert_cache_dir"` // Directory to cache certificates (default: ~/.cache/swoops/autocert)
 }
 
 type DatabaseConfig struct {
@@ -60,7 +68,29 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate HTTP server TLS configuration
-	if c.Server.TLSEnabled {
+	if c.Server.TLSEnabled && c.Server.AutocertEnabled {
+		return fmt.Errorf("cannot enable both manual TLS (tls_enabled) and automatic HTTPS (autocert_enabled)")
+	}
+
+	if c.Server.AutocertEnabled {
+		if c.Server.AutocertDomain == "" {
+			return fmt.Errorf("server.autocert_domain is required when autocert_enabled=true")
+		}
+		// Autocert requires binding to port 443 or using a reverse proxy
+		if c.Server.Port != 443 && c.Server.Port != 80 {
+			log.Printf("Warning: autocert is enabled but port is %d. For Let's Encrypt to work, you typically need port 443 (HTTPS) and 80 (HTTP challenge)", c.Server.Port)
+		}
+		// Set default cache directory if not specified
+		if c.Server.AutocertCacheDir == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory for autocert cache: %w", err)
+			}
+			c.Server.AutocertCacheDir = filepath.Join(homeDir, ".cache", "swoops", "autocert")
+		}
+		log.Printf("Automatic HTTPS enabled for domain: %s", c.Server.AutocertDomain)
+		log.Printf("Certificates will be cached in: %s", c.Server.AutocertCacheDir)
+	} else if c.Server.TLSEnabled {
 		if c.Server.TLSCert == "" {
 			return fmt.Errorf("server.tls_cert is required when tls_enabled=true")
 		}
@@ -170,6 +200,18 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SWOOPS_TLS_ENABLED"); v != "" {
 		cfg.Server.TLSEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("SWOOPS_AUTOCERT_ENABLED"); v != "" {
+		cfg.Server.AutocertEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("SWOOPS_AUTOCERT_DOMAIN"); v != "" {
+		cfg.Server.AutocertDomain = v
+	}
+	if v := os.Getenv("SWOOPS_AUTOCERT_EMAIL"); v != "" {
+		cfg.Server.AutocertEmail = v
+	}
+	if v := os.Getenv("SWOOPS_AUTOCERT_CACHE_DIR"); v != "" {
+		cfg.Server.AutocertCacheDir = v
 	}
 	if v := os.Getenv("SWOOPS_GRPC_HOST"); v != "" {
 		cfg.GRPC.Host = v
