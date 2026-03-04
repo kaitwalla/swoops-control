@@ -127,6 +127,39 @@ func (s *Store) UpdateUserLastLogin(userID string) error {
 	return nil
 }
 
+// ResetUserPassword resets a user's password by username.
+func (s *Store) ResetUserPassword(username, newPassword string) error {
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	// Update the password
+	now := time.Now()
+	result, err := s.db.Exec(`
+		UPDATE users
+		SET password_hash = ?, updated_at = ?
+		WHERE username = ?
+	`, string(hashedPassword), now, username)
+
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	// Check if user was found
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
 // CreateUserSession creates a new session token for a user.
 func (s *Store) CreateUserSession(userID, userAgent, ipAddress string) (*models.UserSession, string, error) {
 	// Generate session token

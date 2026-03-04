@@ -38,6 +38,10 @@ func main() {
 		runCreateUser(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		runResetPassword(os.Args[2:])
+		return
+	}
 
 	configPath := flag.String("config", "", "path to config file")
 	showVersion := flag.Bool("version", false, "show version information and exit")
@@ -197,7 +201,7 @@ func main() {
 	go func() {
 		checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		updateInfo, err := version.CheckForUpdates(checkCtx, "anthropics", "swoops-control")
+		updateInfo, err := version.CheckForUpdates(checkCtx, "kaitwalla", "swoops-control")
 		if err != nil {
 			log.Printf("version check: failed to check for updates: %v", err)
 			return
@@ -459,7 +463,7 @@ func runCreateUser(args []string) {
 		if err != nil {
 			log.Fatalf("Failed to read password: %v", err)
 		}
-		password = string(passwordBytes)
+		password = strings.TrimSpace(string(passwordBytes))
 
 		// Confirm password
 		fmt.Print("Confirm password: ")
@@ -469,7 +473,7 @@ func runCreateUser(args []string) {
 			log.Fatalf("Failed to read password confirmation: %v", err)
 		}
 
-		if password != string(confirmBytes) {
+		if password != strings.TrimSpace(string(confirmBytes)) {
 			log.Fatal("Passwords do not match")
 		}
 	} else {
@@ -525,4 +529,82 @@ func runCreateUser(args []string) {
 	fmt.Printf("  Is Admin: %v\n", user.IsAdmin)
 	fmt.Printf("  Created:  %s\n", user.CreatedAt.Format(time.RFC3339))
 	fmt.Printf("\nYou can now login at the web interface with these credentials.\n")
+}
+
+// runResetPassword handles the reset-password subcommand
+func runResetPassword(args []string) {
+	if len(args) != 1 {
+		fmt.Println("Usage: swoopsd reset-password <username>")
+		fmt.Println("Password will be read securely from stdin")
+		fmt.Println("Example: swoopsd reset-password admin")
+		os.Exit(1)
+	}
+
+	username := args[0]
+
+	// Read password securely from stdin
+	var password string
+	if term.IsTerminal(int(syscall.Stdin)) {
+		// Interactive mode: prompt for password without echo
+		fmt.Print("Enter new password: ")
+		passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Println() // New line after password input
+		if err != nil {
+			log.Fatalf("Failed to read password: %v", err)
+		}
+		password = strings.TrimSpace(string(passwordBytes))
+
+		// Confirm password
+		fmt.Print("Confirm password: ")
+		confirmBytes, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Println() // New line after confirmation
+		if err != nil {
+			log.Fatalf("Failed to read password confirmation: %v", err)
+		}
+
+		if password != strings.TrimSpace(string(confirmBytes)) {
+			log.Fatal("Passwords do not match")
+		}
+	} else {
+		// Non-interactive mode: read from pipe/stdin
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatalf("Failed to read password from stdin: %v", err)
+		}
+		password = strings.TrimSpace(line)
+	}
+
+	if password == "" {
+		log.Fatal("Password cannot be empty")
+	}
+
+	// Get database path from environment or use default
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		// Load from config if available
+		cfg, err := config.Load("")
+		if err == nil && cfg.Database.Path != "" {
+			dbPath = cfg.Database.Path
+		} else {
+			dbPath = "./swoops.db"
+		}
+	}
+
+	// Open database
+	s, err := store.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+
+	// Reset the password
+	err = s.ResetUserPassword(username, password)
+	if err == store.ErrNotFound {
+		log.Fatalf("User '%s' not found", username)
+	}
+	if err != nil {
+		log.Fatalf("Failed to reset password: %v", err)
+	}
+
+	fmt.Printf("✓ Password reset successfully for user '%s'\n", username)
 }
