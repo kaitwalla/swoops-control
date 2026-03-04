@@ -381,18 +381,48 @@ func performUpdate() error {
 
 	// Replace current binary
 	log.Printf("Installing to %s...", exePath)
-	if err := os.Rename(tempPath, exePath); err != nil {
-		// If rename fails (cross-device link), try copy
+
+	// Try to rename first (atomic operation)
+	err = os.Rename(tempPath, exePath)
+	if err != nil {
+		// If rename fails, try copy
 		input, err := os.ReadFile(tempPath)
 		if err != nil {
 			return fmt.Errorf("read temp file: %w", err)
 		}
 		if err := os.WriteFile(exePath, input, 0755); err != nil {
+			// Check if it's a permission error
+			if os.IsPermission(err) {
+				return fmt.Errorf("permission denied writing to %s - try running with sudo: sudo %s --update", exePath, exePath)
+			}
 			return fmt.Errorf("write binary: %w", err)
 		}
 	}
 
+	// On Linux, try to grant CAP_NET_BIND_SERVICE for autocert (port 443/80)
+	if goos == "linux" {
+		// Check if setcap exists
+		if _, err := exec.LookPath("setcap"); err != nil {
+			log.Printf("Warning: setcap command not found - cannot grant CAP_NET_BIND_SERVICE capability")
+			log.Printf("Install libcap2-bin (Debian/Ubuntu) or libcap (RHEL/Fedora), then run:")
+			log.Printf("  sudo setcap 'cap_net_bind_service=+ep' %s", exePath)
+		} else {
+			log.Println("Granting CAP_NET_BIND_SERVICE capability for port 443/80 binding...")
+			cmd := exec.Command("setcap", "cap_net_bind_service=+ep", exePath)
+			if err := cmd.Run(); err != nil {
+				log.Printf("Warning: Failed to grant CAP_NET_BIND_SERVICE capability: %v", err)
+				log.Printf("If using autocert, run manually: sudo setcap 'cap_net_bind_service=+ep' %s", exePath)
+			} else {
+				log.Println("✓ CAP_NET_BIND_SERVICE capability granted")
+			}
+		}
+	}
+
 	log.Println("✓ Update complete! Restart swoopsd for changes to take effect:")
-	log.Println("  sudo systemctl restart swoopsd")
+	if goos == "linux" {
+		log.Println("  sudo systemctl restart swoopsd")
+	} else {
+		log.Println("  Restart your swoopsd service")
+	}
 	return nil
 }

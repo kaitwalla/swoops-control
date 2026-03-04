@@ -160,12 +160,32 @@ install_binary() {
 
     chmod +x "/tmp/${download_name}"
 
+    local install_path
     if [ "$INSTALL_DIR" = "." ]; then
         mv "/tmp/${download_name}" "./${binary_name}"
-        info "Installed $binary_name to $(pwd)/${binary_name}"
+        install_path="$(pwd)/${binary_name}"
+        info "Installed $binary_name to $install_path"
     else
         mv "/tmp/${download_name}" "${INSTALL_DIR}/${binary_name}"
-        info "Installed $binary_name to ${INSTALL_DIR}/${binary_name}"
+        install_path="${INSTALL_DIR}/${binary_name}"
+        info "Installed $binary_name to $install_path"
+    fi
+
+    # On Linux, grant CAP_NET_BIND_SERVICE to swoopsd for autocert (port 443/80)
+    if [ "$OS" = "linux" ] && [ "$binary_name" = "swoopsd" ]; then
+        if command -v setcap &> /dev/null; then
+            info "Granting CAP_NET_BIND_SERVICE capability for port 443/80 binding..."
+            if setcap 'cap_net_bind_service=+ep' "$install_path" 2>/dev/null; then
+                info "✓ CAP_NET_BIND_SERVICE capability granted"
+            else
+                warn "Failed to grant CAP_NET_BIND_SERVICE capability (may need sudo)"
+                warn "If using autocert, run: sudo setcap 'cap_net_bind_service=+ep' $install_path"
+            fi
+        else
+            warn "setcap command not found - cannot grant CAP_NET_BIND_SERVICE capability"
+            warn "Install libcap2-bin (Debian/Ubuntu) or libcap (RHEL/Fedora), then run:"
+            warn "  sudo setcap 'cap_net_bind_service=+ep' $install_path"
+        fi
     fi
 }
 

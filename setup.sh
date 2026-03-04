@@ -190,6 +190,23 @@ if command -v swoopsd &> /dev/null; then
         info "Installing new binary to $SWOOPSD_PATH..."
         sudo mv "$TEMP_BINARY" "$SWOOPSD_PATH"
 
+        # On Linux, grant CAP_NET_BIND_SERVICE for autocert (port 443/80)
+        if [ "$OS" = "linux" ]; then
+            if command -v setcap &> /dev/null; then
+                info "Granting CAP_NET_BIND_SERVICE capability for port 443/80 binding..."
+                if sudo setcap 'cap_net_bind_service=+ep' "$SWOOPSD_PATH"; then
+                    success "✓ CAP_NET_BIND_SERVICE capability granted"
+                else
+                    warn "Failed to grant CAP_NET_BIND_SERVICE capability"
+                    warn "If using autocert, run: sudo setcap 'cap_net_bind_service=+ep' $SWOOPSD_PATH"
+                fi
+            else
+                warn "setcap command not found - cannot grant CAP_NET_BIND_SERVICE capability"
+                warn "Install libcap2-bin (Debian/Ubuntu) or libcap (RHEL/Fedora), then run:"
+                warn "  sudo setcap 'cap_net_bind_service=+ep' $SWOOPSD_PATH"
+            fi
+        fi
+
         success "Update complete! Updated to $LATEST_VERSION"
         echo
         info "To apply the update, restart swoopsd:"
@@ -1146,6 +1163,23 @@ if [ "$NEED_SERVER_BINARY" = true ] || [ "$NEED_AGENT_BINARY" = true ]; then
         chmod +x "$TEMP_BINARY"
         sudo mv "$TEMP_BINARY" /usr/local/bin/swoopsd
         success "Installed swoopsd to /usr/local/bin/swoopsd"
+
+        # On Linux, grant CAP_NET_BIND_SERVICE for autocert (port 443/80)
+        if [ "$OS" = "linux" ]; then
+            if command -v setcap &> /dev/null; then
+                info "Granting CAP_NET_BIND_SERVICE capability for port 443/80 binding..."
+                if sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/swoopsd; then
+                    success "✓ CAP_NET_BIND_SERVICE capability granted"
+                else
+                    warn "Failed to grant CAP_NET_BIND_SERVICE capability"
+                    warn "If using autocert, run: sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/swoopsd"
+                fi
+            else
+                warn "setcap command not found - cannot grant CAP_NET_BIND_SERVICE capability"
+                warn "Install libcap2-bin (Debian/Ubuntu) or libcap (RHEL/Fedora), then run:"
+                warn "  sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/swoopsd"
+            fi
+        fi
     fi
 
     # Download agent binary
