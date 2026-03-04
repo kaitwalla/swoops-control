@@ -1,6 +1,7 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Server, Terminal, Puzzle, FileSliders } from 'lucide-react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Server, Terminal, Puzzle, FileSliders, LogOut, User } from 'lucide-react';
 import { UpdateBanner } from './UpdateBanner';
+import { useAuthStore } from '../stores/authStore';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -11,6 +12,14 @@ const navItems = [
 ];
 
 export function Layout() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
       <aside className="w-56 border-r border-gray-800 flex flex-col">
@@ -36,6 +45,21 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* User menu at bottom */}
+        <div className="p-2 border-t border-gray-800">
+          <div className="px-3 py-2 text-xs text-gray-500 flex items-center gap-2">
+            <User size={14} />
+            <span className="truncate">{user?.username || 'User'}</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-400 hover:bg-gray-800/50 hover:text-gray-200 transition-colors"
+          >
+            <LogOut size={16} />
+            Logout
+          </button>
+        </div>
       </aside>
       <main className="flex-1 overflow-auto flex flex-col">
         <UpdateBanner />

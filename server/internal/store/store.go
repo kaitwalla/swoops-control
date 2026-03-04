@@ -22,6 +22,9 @@ type Store struct {
 // ErrNotFound is returned when a mutation targets a nonexistent row.
 var ErrNotFound = fmt.Errorf("not found")
 
+// ErrDuplicateUser is returned when trying to create a user with duplicate username or email.
+var ErrDuplicateUser = fmt.Errorf("username or email already exists")
+
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
 	if err != nil {
@@ -57,6 +60,7 @@ func (s *Store) migrate() error {
 		"migrations/001_init.sql",
 		"migrations/002_add_agent_auth.sql",
 		"migrations/003_mcp_bridge.sql",
+		"migrations/004_add_users.sql",
 	}
 
 	for _, migration := range migrations {

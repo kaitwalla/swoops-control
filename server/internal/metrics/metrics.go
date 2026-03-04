@@ -31,6 +31,30 @@ var (
 		[]string{"method", "path"},
 	)
 
+	// WAF metrics
+	WAFRequestsBlocked = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "swoops_waf_requests_blocked_total",
+			Help: "Total number of requests blocked by WAF by reason",
+		},
+		[]string{"reason"},
+	)
+
+	WAFRateLimitHits = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "swoops_waf_rate_limit_hits_total",
+			Help: "Total number of requests blocked due to rate limiting",
+		},
+	)
+
+	WAFMaliciousPatterns = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "swoops_waf_malicious_patterns_total",
+			Help: "Total number of malicious patterns detected by type",
+		},
+		[]string{"pattern_type"},
+	)
+
 	// gRPC agent connection metrics
 	AgentConnectionsActive = promauto.NewGauge(
 		prometheus.GaugeOpts{

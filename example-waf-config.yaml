@@ -1,0 +1,46 @@
+# Example Swoops configuration with WAF enabled
+server:
+  host: 0.0.0.0
+  port: 8080
+
+database:
+  path: swoops.db
+
+grpc:
+  host: 0.0.0.0
+  port: 9090
+  insecure: true  # For development only
+
+auth:
+  # api_key: your-api-key-here  # Or use SWOOPS_API_KEY env var
+
+# Web Application Firewall configuration
+waf:
+  # Enable WAF protection
+  enabled: true
+
+  # Rate limiting settings
+  rate_limit_enabled: true
+  requests_per_minute: 60  # Max 60 requests per IP per minute
+  burst_size: 10           # Allow burst of 10 requests
+
+  # Request filtering
+  filter_enabled: true
+  max_request_body_size: 10485760  # 10MB in bytes
+
+  # Block suspicious user agents (scanners, bots)
+  block_suspicious_ua: true
+
+  # Log all blocked requests for security monitoring
+  log_blocked_requests: true
+
+  # Block specific IPs (example)
+  blocked_ips: []
+    # - "192.168.1.100"
+    # - "10.0.0.50"
+
+  # Allow only specific IPs (if set, only these IPs can access)
+  # Leave empty to allow all IPs (subject to other WAF rules)
+  allowed_ips: []
+    # - "192.168.1.0/24"
+    # - "10.0.0.1"

@@ -17,6 +17,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	GRPC     GRPCConfig     `yaml:"grpc"`
 	Auth     AuthConfig     `yaml:"auth"`
+	WAF      WAFConfig      `yaml:"waf"`
 }
 
 type ServerConfig struct {
@@ -53,6 +54,19 @@ type GRPCConfig struct {
 
 type AuthConfig struct {
 	APIKey string `yaml:"api_key"`
+}
+
+type WAFConfig struct {
+	Enabled              bool     `yaml:"enabled"`               // Enable WAF protection
+	RateLimitEnabled     bool     `yaml:"rate_limit_enabled"`    // Enable rate limiting per IP
+	RequestsPerMinute    int      `yaml:"requests_per_minute"`   // Max requests per IP per minute
+	BurstSize            int      `yaml:"burst_size"`            // Burst allowance for rate limiting
+	FilterEnabled        bool     `yaml:"filter_enabled"`        // Enable malicious pattern filtering
+	MaxRequestBodySize   int64    `yaml:"max_request_body_size"` // Max request body size in bytes
+	BlockSuspiciousUA    bool     `yaml:"block_suspicious_ua"`   // Block suspicious user agents (scanners, bots)
+	LogBlockedRequests   bool     `yaml:"log_blocked_requests"`  // Log blocked requests
+	BlockedIPs           []string `yaml:"blocked_ips"`           // List of IPs to block
+	AllowedIPs           []string `yaml:"allowed_ips"`           // List of allowed IPs (if set, only these IPs allowed)
 }
 
 // Validate checks the configuration for errors
@@ -154,6 +168,18 @@ func DefaultConfig() *Config {
 			Insecure: true, // Default to insecure for dev, should be false in production
 		},
 		Auth: AuthConfig{},
+		WAF: WAFConfig{
+			Enabled:            true,
+			RateLimitEnabled:   true,
+			RequestsPerMinute:  60,
+			BurstSize:          10,
+			FilterEnabled:      true,
+			MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
+			BlockSuspiciousUA:  true,
+			LogBlockedRequests: true,
+			BlockedIPs:         []string{},
+			AllowedIPs:         []string{},
+		},
 	}
 }
 

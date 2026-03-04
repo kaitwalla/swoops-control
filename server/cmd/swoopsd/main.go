@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"github.com/kaitwalla/swoops-control/pkg/version"
 	"github.com/kaitwalla/swoops-control/server/internal/agentconn"
 	"github.com/kaitwalla/swoops-control/server/internal/api"
+	"github.com/kaitwalla/swoops-control/server/internal/certrotate"
 	"github.com/kaitwalla/swoops-control/server/internal/config"
 	"github.com/kaitwalla/swoops-control/server/internal/store"
 	"golang.org/x/crypto/acme/autocert"
@@ -81,8 +81,10 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Configure autocert if enabled
+	// Configure TLS with certificate rotation
 	var autocertManager *autocert.Manager
+	var httpCertRotator *certrotate.CertRotator
+
 	if cfg.Server.AutocertEnabled {
 		// Create cache directory if it doesn't exist
 		if err := os.MkdirAll(cfg.Server.AutocertCacheDir, 0700); err != nil {
@@ -100,6 +102,21 @@ func main() {
 
 		httpServer.TLSConfig = autocertManager.TLSConfig()
 		log.Printf("Autocert configured for domain: %s (cache: %s)", cfg.Server.AutocertDomain, cfg.Server.AutocertCacheDir)
+		log.Printf("Certificate auto-renewal enabled (Let's Encrypt)")
+	} else if cfg.Server.TLSEnabled {
+		// Manual TLS with certificate rotation
+		httpCertRotator, err = certrotate.NewCertRotator(cfg.Server.TLSCert, cfg.Server.TLSKey, "", logger)
+		if err != nil {
+			log.Fatalf("Failed to initialize certificate rotator: %v", err)
+		}
+		defer httpCertRotator.Stop()
+
+		httpServer.TLSConfig = &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: httpCertRotator.GetCertificateFunc(),
+		}
+		log.Printf("Manual TLS configured with automatic certificate rotation (checking every 5 minutes)")
+		log.Printf("Certificate files: %s, %s", cfg.Server.TLSCert, cfg.Server.TLSKey)
 	}
 
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
@@ -110,39 +127,47 @@ func main() {
 
 	// Configure gRPC server with optional TLS and mTLS
 	var grpcServer *grpc.Server
+	var grpcCertRotator *certrotate.CertRotator
+
 	if cfg.GRPC.Insecure {
 		log.Printf("Warning: gRPC server running in INSECURE mode (no TLS)")
 		grpcServer = grpc.NewServer()
 	} else {
-		tlsConfig := &tls.Config{
-			MinVersion: tls.VersionTLS13,
+		// Initialize certificate rotator for gRPC
+		caFile := ""
+		if cfg.GRPC.RequireMTLS {
+			caFile = cfg.GRPC.ClientCA
 		}
 
-		// Load server certificate
-		cert, err := tls.LoadX509KeyPair(cfg.GRPC.TLSCert, cfg.GRPC.TLSKey)
+		grpcCertRotator, err = certrotate.NewCertRotator(cfg.GRPC.TLSCert, cfg.GRPC.TLSKey, caFile, logger)
 		if err != nil {
-			log.Fatalf("Failed to load server certificate: %v", err)
+			log.Fatalf("Failed to initialize gRPC certificate rotator: %v", err)
 		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
+		defer grpcCertRotator.Stop()
+
+		tlsConfig := &tls.Config{
+			MinVersion:     tls.VersionTLS13,
+			GetCertificate: grpcCertRotator.GetCertificateFunc(),
+		}
 
 		// Configure mTLS if enabled
 		if cfg.GRPC.RequireMTLS {
-			// Load CA certificate for client verification
-			caCert, err := os.ReadFile(cfg.GRPC.ClientCA)
-			if err != nil {
-				log.Fatalf("Failed to read client CA certificate: %v", err)
-			}
-
-			certPool := x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caCert) {
-				log.Fatalf("Failed to parse client CA certificate")
-			}
-
-			tlsConfig.ClientCAs = certPool
+			// Use dynamic CA pool from cert rotator
+			tlsConfig.ClientCAs = grpcCertRotator.GetCACertPool()
 			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-			log.Printf("gRPC server configured with mTLS (server cert: %s, client CA: %s)", cfg.GRPC.TLSCert, cfg.GRPC.ClientCA)
+
+			// Update GetConfigForClient to provide fresh CA pool for each connection
+			tlsConfig.GetConfigForClient = func(info *tls.ClientHelloInfo) (*tls.Config, error) {
+				config := tlsConfig.Clone()
+				config.ClientCAs = grpcCertRotator.GetCACertPool()
+				return config, nil
+			}
+
+			log.Printf("gRPC server configured with mTLS and automatic certificate rotation")
+			log.Printf("Server cert: %s, Client CA: %s", cfg.GRPC.TLSCert, cfg.GRPC.ClientCA)
 		} else {
-			log.Printf("gRPC server configured with TLS (cert: %s)", cfg.GRPC.TLSCert)
+			log.Printf("gRPC server configured with TLS and automatic certificate rotation")
+			log.Printf("Server cert: %s", cfg.GRPC.TLSCert)
 		}
 
 		creds := credentials.NewTLS(tlsConfig)

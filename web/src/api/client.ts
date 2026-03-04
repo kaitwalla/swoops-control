@@ -1,12 +1,16 @@
 const BASE = '/api/v1';
 
-// API key is injected into the page by the server or set via localStorage
-function getApiKey(): string {
-  // Check localStorage first (set via settings page or login)
-  const stored = localStorage.getItem('swoops_api_key');
-  if (stored) return stored;
+// Get authentication token (session token or API key)
+function getAuthToken(): string {
+  // Try session token first (from user login)
+  const sessionToken = localStorage.getItem('swoops_session_token');
+  if (sessionToken) return sessionToken;
 
-  // Check meta tag (server-injected)
+  // Fall back to API key (for API-based access)
+  const apiKey = localStorage.getItem('swoops_api_key');
+  if (apiKey) return apiKey;
+
+  // Check meta tag (server-injected API key)
   const meta = document.querySelector('meta[name="swoops-api-key"]');
   if (meta) return meta.getAttribute('content') || '';
 
@@ -18,17 +22,21 @@ export function setApiKey(key: string) {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const apiKey = getApiKey();
+  const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${BASE}${path}`, {
-    headers,
     ...options,
+    credentials: 'include', // Include cookies for session auth
+    headers: {
+      ...headers,
+      ...(options?.headers as Record<string, string>),
+    },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));

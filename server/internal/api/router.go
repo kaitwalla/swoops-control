@@ -2,8 +2,10 @@ package api
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -19,10 +21,12 @@ import (
 type Server struct {
 	store      *store.Store
 	config     *config.Config
+	configMu   sync.RWMutex // Protects concurrent access to config
 	sessionMgr *sessionmgr.Manager
 	agentOut   AgentOutputSource
 	wsUpgrader websocket.Upgrader
 	router     chi.Router
+	waf        *WAFMiddleware
 
 	// launchFunc is called asynchronously after session creation.
 	// Defaults to sessionMgr.LaunchSession. Override in tests to disable SSH.
@@ -55,6 +59,23 @@ func (s *Server) SetAgentController(controller sessionmgr.AgentController) {
 
 func (s *Server) setupRoutes() {
 	r := chi.NewRouter()
+
+	// WAF should be first to block malicious requests early
+	if s.config.WAF.Enabled {
+		wafConfig := WAFConfig{
+			RateLimitEnabled:   s.config.WAF.RateLimitEnabled,
+			RequestsPerMinute:  s.config.WAF.RequestsPerMinute,
+			BurstSize:          s.config.WAF.BurstSize,
+			FilterEnabled:      s.config.WAF.FilterEnabled,
+			MaxRequestBodySize: s.config.WAF.MaxRequestBodySize,
+			BlockSuspiciousUA:  s.config.WAF.BlockSuspiciousUA,
+			LogBlockedRequests: s.config.WAF.LogBlockedRequests,
+			BlockedIPs:         s.config.WAF.BlockedIPs,
+			AllowedIPs:         s.config.WAF.AllowedIPs,
+		}
+		s.waf = NewWAFMiddleware(wafConfig, slog.Default())
+		r.Use(s.waf.Middleware)
+	}
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -94,11 +115,34 @@ func (s *Server) setupRoutes() {
 		r.Get("/version", s.handleVersion)
 		r.Get("/ca-cert", s.handleGetCACert)
 
+		// Auth endpoints (unauthenticated)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/logout", s.handleLogout)
+
 		// All other API routes require authentication
 		r.Group(func(r chi.Router) {
-			r.Use(APIKeyAuth(s.config.Auth.APIKey))
+			r.Use(s.HybridAuth())
 
 			r.Get("/stats", s.handleStats)
+
+			// User management (current user - available to all authenticated users)
+			r.Get("/auth/me", s.handleGetCurrentUser)
+
+			// Admin-only endpoints
+			r.Group(func(r chi.Router) {
+				r.Use(s.RequireAdmin())
+
+				// WAF management endpoints
+				r.Get("/waf/stats", s.handleWAFStats)
+				r.Get("/waf/config", s.handleGetWAFConfig)
+				r.Put("/waf/config", s.handleUpdateWAFConfig)
+				r.Post("/waf/block-ip", s.handleBlockIP)
+				r.Post("/waf/unblock-ip", s.handleUnblockIP)
+
+				// User management
+				r.Get("/users", s.handleListUsers)
+				r.Post("/users", s.handleCreateUser)
+			})
 
 			r.Route("/hosts", func(r chi.Router) {
 				r.Get("/", s.handleListHosts)
