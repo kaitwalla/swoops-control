@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.2.1"
+SETUP_SCRIPT_VERSION="1.2.2"
 
 # Colors for output
 RED='\033[0;31m'
@@ -648,10 +648,19 @@ if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENAB
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/client-ca.pem"
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/server-ca.pem"
 
-        # Set proper permissions
-        sudo chown -R root:root "$CERT_DIR"
+        # Create swoops user if it doesn't exist (needed for certificate permissions)
+        if ! id swoops &>/dev/null; then
+            sudo useradd -r -s /bin/false swoops || true
+        fi
+
+        # Set proper permissions - readable by swoops user
+        sudo chown -R swoops:swoops "$CERT_DIR"
+        sudo chmod 755 "$CERT_DIR"
         sudo chmod 644 "$CERT_DIR"/*.pem
         sudo chmod 600 "$CERT_DIR"/*-key.pem
+
+        # Also set permissions on step-ca directory for potential renewal operations
+        sudo chown -R swoops:swoops "$STEP_CA_DIR"
 
         success "Certificates generated with step-ca"
         info "CA root certificate: $CERT_DIR/ca-cert.pem"
@@ -733,6 +742,10 @@ EOF
         cp "$CERT_DIR/ca-cert.pem" "$CERT_DIR/server-ca.pem"
 
         rm -f "$CERT_DIR"/*.pem.srl "$CERT_DIR"/*-req.pem "$CERT_DIR/server-ext.cnf"
+
+        # Set proper permissions for self-signed certs
+        chmod 644 "$CERT_DIR"/*.pem
+        chmod 600 "$CERT_DIR"/*-key.pem
 
         success "Certificates generated in $CERT_DIR/"
 
