@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kaitwalla/swoops-control/pkg/models"
@@ -40,6 +41,18 @@ func New(dbPath string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	// Create migrations tracking table if it doesn't exist
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			id INTEGER PRIMARY KEY,
+			migration TEXT NOT NULL UNIQUE,
+			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create migrations table: %w", err)
+	}
+
 	migrations := []string{
 		"migrations/001_init.sql",
 		"migrations/002_add_agent_auth.sql",
@@ -47,15 +60,50 @@ func (s *Store) migrate() error {
 	}
 
 	for _, migration := range migrations {
+		// Check if migration has already been applied
+		var count int
+		err := s.db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE migration = ?", migration).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("check migration %s: %w", migration, err)
+		}
+
+		if count > 0 {
+			// Migration already applied, skip it
+			continue
+		}
+
+		// Read and execute migration
 		data, err := migrationsFS.ReadFile(migration)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", migration, err)
 		}
+
 		if _, err := s.db.Exec(string(data)); err != nil {
+			// If it's a duplicate column error, mark as applied anyway (already partially applied)
+			if isSQLiteDuplicateColumnError(err) {
+				_, _ = s.db.Exec("INSERT INTO schema_migrations (migration) VALUES (?)", migration)
+				continue
+			}
 			return fmt.Errorf("exec %s: %w", migration, err)
+		}
+
+		// Record that migration was applied
+		_, err = s.db.Exec("INSERT INTO schema_migrations (migration) VALUES (?)", migration)
+		if err != nil {
+			return fmt.Errorf("record migration %s: %w", migration, err)
 		}
 	}
 	return nil
+}
+
+// isSQLiteDuplicateColumnError checks if the error is a "duplicate column" error
+func isSQLiteDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "duplicate column") ||
+		   strings.Contains(errStr, "UNIQUE constraint failed")
 }
 
 func (s *Store) Close() error {

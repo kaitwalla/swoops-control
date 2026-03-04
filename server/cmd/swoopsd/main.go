@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -28,11 +30,19 @@ import (
 func main() {
 	configPath := flag.String("config", "", "path to config file")
 	showVersion := flag.Bool("version", false, "show version information and exit")
+	doUpdate := flag.Bool("update", false, "update swoopsd from git and rebuild")
 	flag.Parse()
 
 	if *showVersion {
 		versionInfo := version.Get()
 		fmt.Println(versionInfo.String())
+		os.Exit(0)
+	}
+
+	if *doUpdate {
+		if err := performUpdate(); err != nil {
+			log.Fatalf("Update failed: %v", err)
+		}
 		os.Exit(0)
 	}
 
@@ -174,4 +184,66 @@ func main() {
 	grpcServer.GracefulStop()
 
 	log.Println("Swoops control plane stopped")
+}
+
+func performUpdate() error {
+	log.Println("Starting update process...")
+
+	// Get current executable path
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("get executable path: %w", err)
+	}
+	log.Printf("Current executable: %s", exePath)
+
+	// Find git repository root by walking up from executable
+	gitRoot, err := findGitRoot(exePath)
+	if err != nil {
+		return fmt.Errorf("find git root: %w", err)
+	}
+	log.Printf("Git repository: %s", gitRoot)
+
+	// Pull latest changes
+	log.Println("Pulling latest changes from git...")
+	cmd := exec.Command("git", "pull")
+	cmd.Dir = gitRoot
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git pull: %w", err)
+	}
+
+	// Rebuild the binary
+	log.Println("Rebuilding swoopsd...")
+	buildCmd := exec.Command("go", "build", "-o", exePath, "./server/cmd/swoopsd")
+	buildCmd.Dir = gitRoot
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("build: %w", err)
+	}
+
+	log.Println("✓ Update complete! Please restart swoopsd for changes to take effect.")
+	log.Println("  sudo systemctl restart swoopsd")
+	return nil
+}
+
+func findGitRoot(startPath string) (string, error) {
+	dir := startPath
+	if stat, err := os.Stat(dir); err == nil && !stat.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+
+	for {
+		gitDir := filepath.Join(dir, ".git")
+		if stat, err := os.Stat(gitDir); err == nil && stat.IsDir() {
+			return dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("git repository not found")
+		}
+		dir = parent
+	}
 }
