@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 
@@ -9,15 +9,33 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, token, fetchCurrentUser, loading, isInitialized } = useAuthStore();
   const location = useLocation();
+  const [authTimeout, setAuthTimeout] = useState(false);
 
   useEffect(() => {
     // If we have a token but no user, try to fetch the current user
     if (token && !user && !loading && !isInitialized) {
       fetchCurrentUser();
+
+      // Set a timeout to prevent infinite loading
+      const timeout = setTimeout(() => {
+        setAuthTimeout(true);
+      }, 5000); // 5 second timeout
+
+      return () => clearTimeout(timeout);
     }
   }, [token, user, loading, isInitialized, fetchCurrentUser]);
 
-  // Show loading state while checking authentication
+  // If no token, redirect to login
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // If authentication timed out or fetching user failed (after initialization), redirect to login
+  if (authTimeout || (token && !user && isInitialized)) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Show loading state while checking authentication (but only briefly)
   if (loading || (token && !isInitialized)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950">
@@ -27,16 +45,6 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         </div>
       </div>
     );
-  }
-
-  // If no token, redirect to login
-  if (!token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  // If we have a token but fetching user failed (after initialization), redirect to login
-  if (token && !user && isInitialized) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;
