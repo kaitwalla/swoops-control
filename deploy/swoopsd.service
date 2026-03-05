@@ -1,0 +1,41 @@
+[Unit]
+Description=Swoops Control Plane
+Documentation=https://github.com/kaitwalla/swoops-control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=swoops
+Group=swoops
+WorkingDirectory=/var/lib/swoops
+
+# Automatically grant CAP_NET_BIND_SERVICE capability on start
+# This allows binding to ports 443 and 80 without running as root
+# Required for autocert (Let's Encrypt) to work
+ExecStartPre=/usr/sbin/setcap 'cap_net_bind_service=+ep' /usr/local/bin/swoopsd
+
+# Start the service
+ExecStart=/usr/local/bin/swoopsd --config /etc/swoops/config.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/swoops /var/cache/swoops /etc/swoops
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=swoopsd
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

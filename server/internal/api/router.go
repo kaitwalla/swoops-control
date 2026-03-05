@@ -119,6 +119,9 @@ func (s *Server) setupRoutes() {
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
 
+		// Client cert download (uses auth token for authentication)
+		r.Get("/hosts/{id}/client-cert", s.handleGetClientCert)
+
 		// All other API routes require authentication
 		r.Group(func(r chi.Router) {
 			r.Use(s.HybridAuth())
@@ -154,7 +157,6 @@ func (s *Server) setupRoutes() {
 					r.Put("/", s.handleUpdateHost)
 					r.Delete("/", s.handleDeleteHost)
 					r.Get("/sessions", s.handleListHostSessions)
-					r.Get("/client-cert", s.handleGetClientCert) // Download client cert/key for mTLS
 				})
 			})
 

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -25,12 +26,16 @@ func isSecureRequest(r *http.Request) bool {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req models.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Login: Failed to decode request body: %v", err)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("Login attempt: username='%s', password_length=%d", req.Username, len(req.Password))
+
 	// Validate input
 	if req.Username == "" || req.Password == "" {
+		log.Printf("Login: Empty username or password")
 		http.Error(w, "username and password required", http.StatusBadRequest)
 		return
 	}
@@ -38,25 +43,34 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Get user by username
 	user, err := s.store.GetUserByUsername(req.Username)
 	if err == store.ErrNotFound {
+		log.Printf("Login: User '%s' not found", req.Username)
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
 	}
 	if err != nil {
+		log.Printf("Login: Database error getting user '%s': %v", req.Username, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("Login: Found user '%s', is_active=%v, hash_length=%d",
+		user.Username, user.IsActive, len(user.PasswordHash))
+
 	// Check if user is active
 	if !user.IsActive {
+		log.Printf("Login: User '%s' account is disabled", req.Username)
 		http.Error(w, "account is disabled", http.StatusForbidden)
 		return
 	}
 
 	// Verify password
 	if err := s.store.VerifyPassword(user, req.Password); err != nil {
+		log.Printf("Login: Password verification failed for '%s': %v", req.Username, err)
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
 	}
+
+	log.Printf("Login: Password verified successfully for '%s'", req.Username)
 
 	// Update last login
 	if err := s.store.UpdateUserLastLogin(user.ID); err != nil {

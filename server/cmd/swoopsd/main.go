@@ -508,6 +508,9 @@ func runCreateUser(args []string) {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
+	// Log password details for debugging
+	log.Printf("Creating user with password length: %d", len(password))
+
 	// Create admin user
 	req := &models.CreateUserRequest{
 		Username: username,
@@ -578,6 +581,9 @@ func runResetPassword(args []string) {
 	if password == "" {
 		log.Fatal("Password cannot be empty")
 	}
+
+	// Log password details for debugging
+	log.Printf("Resetting password with length: %d", len(password))
 
 	// Get database path from environment or use default
 	dbPath := os.Getenv("DB_PATH")
