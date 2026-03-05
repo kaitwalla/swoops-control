@@ -73,11 +73,6 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
 
       if (serverInfo.grpc_secure) {
         setupCmd += ` --download-ca --http-url ${serverInfo.http_url}`;
-
-        // If we have client cert/key, we need to save them first
-        if (response.client_cert && response.client_key) {
-          setupCmd += ` # Note: Client certificates will be downloaded during setup`;
-        }
       }
 
       setAgentSetupCommand(setupCmd);
