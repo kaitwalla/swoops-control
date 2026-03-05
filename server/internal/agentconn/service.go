@@ -261,6 +261,15 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 					"error", err)
 				return status.Errorf(codes.Internal, "update heartbeat: %v", err)
 			}
+			// Update agent version and update info if provided
+			if msg.Heartbeat.UpdateAvailable || msg.Heartbeat.CurrentVersion != "" {
+				if err := s.store.UpdateHostUpdateInfo(hello.HostID, msg.Heartbeat.UpdateAvailable, msg.Heartbeat.LatestVersion, msg.Heartbeat.UpdateURL); err != nil {
+					s.logger.Error("failed to update host update info",
+						"host_id", hello.HostID,
+						"error", err)
+					// Non-fatal, continue processing
+				}
+			}
 			metrics.AgentHeartbeatsReceived.Inc()
 
 		case msg.Output != nil:

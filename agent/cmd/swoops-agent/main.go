@@ -148,6 +148,9 @@ func runCommand(args []string) error {
 	versionInfo := version.Get()
 	log.Printf("swoops-agent starting: %s host_id=%s server=%s insecure=%v", versionInfo.String(), *hostID, *serverAddr, *insecure)
 
+	// Create a channel to send update info to the runtime
+	updateInfoChan := make(chan *version.UpdateInfo, 1)
+
 	// Check for updates periodically in background
 	go func() {
 		checkForUpdate := func() {
@@ -161,6 +164,11 @@ func runCommand(args []string) error {
 			if updateInfo.UpdateAvailable {
 				log.Printf("⚠️  Update available: v%s → v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
 				log.Printf("   Download: %s", updateInfo.UpdateURL)
+			}
+			// Send update info to channel (non-blocking)
+			select {
+			case updateInfoChan <- updateInfo:
+			default:
 			}
 		}
 
@@ -195,7 +203,7 @@ func runCommand(args []string) error {
 		default:
 		}
 
-		err := connectAndRun(ctx, *serverAddr, *hostID, token, name, tlsConfig)
+		err := connectAndRun(ctx, *serverAddr, *hostID, token, name, tlsConfig, updateInfoChan)
 		if err == nil || errors.Is(err, context.Canceled) {
 			return nil
 		}
@@ -222,7 +230,7 @@ type tlsClientConfig struct {
 	serverCA  string
 }
 
-func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName string, tlsConfig *tlsClientConfig) error {
+func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName string, tlsConfig *tlsClientConfig, updateInfoChan <-chan *version.UpdateInfo) error {
 	// Configure gRPC credentials based on TLS settings
 	var creds credentials.TransportCredentials
 	if tlsConfig.insecure {
@@ -338,13 +346,22 @@ func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName 
 		case err := <-sendErr:
 			rt.close()
 			return err
+		case updateInfo := <-updateInfoChan:
+			rt.setUpdateInfo(updateInfo)
 		case <-ticker.C:
+			hb := &agentrpc.Heartbeat{
+				SentUnix:        time.Now().Unix(),
+				RunningSessions: int32(rt.runningSessions()),
+			}
+			if updateInfo := rt.getUpdateInfo(); updateInfo != nil {
+				hb.UpdateAvailable = updateInfo.UpdateAvailable
+				hb.CurrentVersion = updateInfo.CurrentVersion
+				hb.LatestVersion = updateInfo.LatestVersion
+				hb.UpdateURL = updateInfo.UpdateURL
+			}
 			select {
 			case outbound <- &agentrpc.AgentEnvelope{
-				Heartbeat: &agentrpc.Heartbeat{
-					SentUnix:        time.Now().Unix(),
-					RunningSessions: int32(rt.runningSessions()),
-				},
+				Heartbeat: hb,
 			}:
 			case err := <-sendErr:
 				rt.close()
@@ -373,8 +390,9 @@ type agentRuntime struct {
 
 	outbound chan<- *agentrpc.AgentEnvelope
 
-	mu       sync.Mutex
-	sessions map[string]*sessionRuntime
+	mu              sync.Mutex
+	sessions        map[string]*sessionRuntime
+	updateInfo      *version.UpdateInfo
 }
 
 func newAgentRuntime(outbound chan<- *agentrpc.AgentEnvelope) *agentRuntime {
@@ -399,6 +417,18 @@ func (a *agentRuntime) runningSessions() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return len(a.sessions)
+}
+
+func (a *agentRuntime) setUpdateInfo(info *version.UpdateInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.updateInfo = info
+}
+
+func (a *agentRuntime) getUpdateInfo() *version.UpdateInfo {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.updateInfo
 }
 
 func (a *agentRuntime) handleControlMessage(msg *agentrpc.ControlEnvelope) error {

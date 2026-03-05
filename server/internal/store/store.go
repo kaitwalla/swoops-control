@@ -143,12 +143,12 @@ func (s *Store) CreateHost(h *models.Host) error {
 }
 
 func (s *Store) GetHost(id string) (*models.Host, error) {
-	row := s.db.QueryRow(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, update_available, latest_version, update_url, created_at, updated_at FROM hosts WHERE id = ?`, id)
 	return scanHost(row)
 }
 
 func (s *Store) ListHosts() ([]*models.Host, error) {
-	rows, err := s.db.Query(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, update_available, latest_version, update_url, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +221,20 @@ func (s *Store) TouchHostHeartbeat(id string, at time.Time) error {
 		SET status=?, last_heartbeat=?, updated_at=?
 		WHERE id=?`,
 		models.HostStatusOnline, at, now, id,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
+func (s *Store) UpdateHostUpdateInfo(id string, updateAvailable bool, latestVersion, updateURL string) error {
+	now := time.Now()
+	res, err := s.db.Exec(`
+		UPDATE hosts
+		SET update_available=?, latest_version=?, update_url=?, updated_at=?
+		WHERE id=?`,
+		updateAvailable, latestVersion, updateURL, now, id,
 	)
 	if err != nil {
 		return err
@@ -380,6 +394,7 @@ func scanHost(row scannable) (*models.Host, error) {
 		&h.OS, &h.Arch, &h.Status, &h.AgentVersion, &h.AgentAuthToken, &labelsJSON,
 		&h.MaxSessions, &h.BaseRepoPath, &h.WorktreeRoot,
 		&pluginsJSON, &toolsJSON, &lastHeartbeat,
+		&h.UpdateAvailable, &h.LatestVersion, &h.UpdateURL,
 		&h.CreatedAt, &h.UpdatedAt,
 	)
 	if err != nil {

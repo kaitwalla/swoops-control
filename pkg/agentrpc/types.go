@@ -17,8 +17,12 @@ type AgentHello struct {
 }
 
 type Heartbeat struct {
-	SentUnix        int64 `json:"sent_unix,omitempty"`
-	RunningSessions int32 `json:"running_sessions,omitempty"`
+	SentUnix         int64  `json:"sent_unix,omitempty"`
+	RunningSessions  int32  `json:"running_sessions,omitempty"`
+	UpdateAvailable  bool   `json:"update_available,omitempty"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	LatestVersion    string `json:"latest_version,omitempty"`
+	UpdateURL        string `json:"update_url,omitempty"`
 }
 
 type SessionOutput struct {
@@ -51,7 +55,8 @@ type CommandResult struct {
 }
 
 const (
-	CommandLaunch = "launch_session"
-	CommandStop   = "stop_session"
-	CommandInput  = "send_input"
+	CommandLaunch       = "launch_session"
+	CommandStop         = "stop_session"
+	CommandInput        = "send_input"
+	CommandUpdateAgent  = "update_agent"
 )
