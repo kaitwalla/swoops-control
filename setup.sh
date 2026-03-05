@@ -1498,7 +1498,7 @@ EOF
     </array>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>SWOOPS_AUTH_TOKEN</key>
+        <key>SWOOPS_AGENT_TOKEN</key>
         <string>$SWOOPS_AUTH_TOKEN</string>
     </dict>
     <key>RunAtLoad</key>
