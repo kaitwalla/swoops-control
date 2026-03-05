@@ -5,6 +5,35 @@ set -e
 # This script guides you through configuring Swoops for production deployment
 SETUP_SCRIPT_VERSION="1.2.2"
 
+# Parse command line arguments for non-interactive agent setup
+NON_INTERACTIVE=false
+AGENT_SERVER=""
+AGENT_DOWNLOAD_CA=false
+AGENT_HTTP_URL=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --server)
+            AGENT_SERVER="$2"
+            NON_INTERACTIVE=true
+            shift 2
+            ;;
+        --download-ca)
+            AGENT_DOWNLOAD_CA=true
+            shift
+            ;;
+        --http-url)
+            AGENT_HTTP_URL="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--server HOST:PORT] [--download-ca] [--http-url URL]"
+            exit 1
+            ;;
+    esac
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -94,8 +123,42 @@ cat <<EOF
 EOF
 echo -e "${NC}"
 
-info "This script will help you configure Swoops for production deployment."
-echo
+# Non-interactive agent setup mode
+if [ "$NON_INTERACTIVE" = true ]; then
+    info "Running non-interactive agent setup..."
+    info "Server: $AGENT_SERVER"
+
+    # Skip to agent installation
+    INSTALL_SERVER=false
+    INSTALL_AGENT=true
+
+    # Parse server address
+    CONTROL_PLANE_HOST="${AGENT_SERVER%:*}"
+    CONTROL_PLANE_PORT="${AGENT_SERVER#*:}"
+
+    # Set host ID to hostname
+    HOST_ID=$(hostname)
+
+    # Determine TLS settings based on flags
+    if [ "$AGENT_DOWNLOAD_CA" = true ]; then
+        AGENT_TLS_ENABLED=true
+        AGENT_MTLS_ENABLED=false
+        AGENT_CA_PATH="/etc/swoops/certs/server-ca.pem"
+    else
+        AGENT_TLS_ENABLED=false
+        AGENT_MTLS_ENABLED=false
+    fi
+
+    # Auth token will be prompted for later if needed
+    AGENT_AUTH_TOKEN=""
+
+    # Jump to binary installation (skip all the interactive setup)
+    SKIP_INTERACTIVE=true
+else
+    SKIP_INTERACTIVE=false
+    info "This script will help you configure Swoops for production deployment."
+    echo
+fi
 
 # Detect OS early (needed for update path)
 OS="unknown"
@@ -111,8 +174,8 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
     INIT_SYSTEM="launchd"
 fi
 
-# Check if swoopsd is already installed
-if command -v swoopsd &> /dev/null; then
+# Check if swoopsd is already installed (skip in non-interactive mode)
+if [ "$SKIP_INTERACTIVE" = false ] && command -v swoopsd &> /dev/null; then
     SWOOPSD_PATH=$(which swoopsd)
     SWOOPSD_VERSION=$(swoopsd --version 2>/dev/null | head -1 || echo "unknown")
 
@@ -222,29 +285,31 @@ if command -v swoopsd &> /dev/null; then
     FORCE_DOWNLOAD_BINARIES=true
 fi
 
-info "Detected OS: $OS ($INIT_SYSTEM)"
-echo
+if [ "$SKIP_INTERACTIVE" = false ]; then
+    info "Detected OS: $OS ($INIT_SYSTEM)"
+    echo
 
-# Step 1: Choose what to install
-echo -e "${GREEN}Step 1: Choose Components${NC}"
-echo "  1) Control Plane (server)"
-echo "  2) Agent"
-echo "  3) Both (server + agent on same machine)"
-prompt INSTALL_TYPE "What would you like to install? [1-3]" "1"
+    # Step 1: Choose what to install
+    echo -e "${GREEN}Step 1: Choose Components${NC}"
+    echo "  1) Control Plane (server)"
+    echo "  2) Agent"
+    echo "  3) Both (server + agent on same machine)"
+    prompt INSTALL_TYPE "What would you like to install? [1-3]" "1"
 
-INSTALL_SERVER=false
-INSTALL_AGENT=false
+    INSTALL_SERVER=false
+    INSTALL_AGENT=false
 
-case $INSTALL_TYPE in
-    1) INSTALL_SERVER=true ;;
-    2) INSTALL_AGENT=true ;;
-    3) INSTALL_SERVER=true; INSTALL_AGENT=true ;;
-    *) error "Invalid choice"; exit 1 ;;
-esac
-echo
+    case $INSTALL_TYPE in
+        1) INSTALL_SERVER=true ;;
+        2) INSTALL_AGENT=true ;;
+        3) INSTALL_SERVER=true; INSTALL_AGENT=true ;;
+        *) error "Invalid choice"; exit 1 ;;
+    esac
+    echo
+fi
 
 # Step 2: Deployment type (if installing server)
-if [ "$INSTALL_SERVER" = true ]; then
+if [ "$SKIP_INTERACTIVE" = false ] && [ "$INSTALL_SERVER" = true ]; then
     echo -e "${GREEN}Step 2: Deployment Type${NC}"
     echo "  1) Automatic HTTPS (built-in Let's Encrypt) - Easiest!"
     echo "  2) Production with reverse proxy (Caddy/nginx)"
@@ -280,7 +345,7 @@ if [ "$INSTALL_SERVER" = true ]; then
 fi
 
 # Step 3: Server configuration
-if [ "$INSTALL_SERVER" = true ]; then
+if [ "$SKIP_INTERACTIVE" = false ] && [ "$INSTALL_SERVER" = true ]; then
     echo -e "${GREEN}Step 3: Server Configuration${NC}"
 
     prompt DOMAIN "Domain name" "swoops.example.com"
@@ -351,7 +416,7 @@ if [ "$INSTALL_SERVER" = true ]; then
 fi
 
 # Step 4: Agent configuration
-if [ "$INSTALL_AGENT" = true ]; then
+if [ "$SKIP_INTERACTIVE" = false ] && [ "$INSTALL_AGENT" = true ]; then
     echo -e "${GREEN}Step 4: Agent Configuration${NC}"
 
     if [ "$INSTALL_SERVER" = true ]; then
@@ -400,7 +465,7 @@ if [ "$INSTALL_AGENT" = true ]; then
 fi
 
 # Step 5: Generate certificates
-if [ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENABLED" = true ]; then
+if [ "$SKIP_INTERACTIVE" = false ] && ([ "$GRPC_TLS_ENABLED" = true ] || [ "$USE_TLS" = true ] || [ "$AGENT_TLS_ENABLED" = true ]); then
     echo -e "${GREEN}Step 5: Certificate Generation${NC}"
     echo
     echo "Choose certificate generation method:"
@@ -832,15 +897,21 @@ EOF
 fi
 
 # Step 6: Write configuration files
-echo -e "${GREEN}Step 6: Writing Configuration${NC}"
+if [ "$SKIP_INTERACTIVE" = false ]; then
+    echo -e "${GREEN}Step 6: Writing Configuration${NC}"
 
-CONFIG_DIR="."
-if confirm "Create config in /etc/swoops?" "n"; then
+    CONFIG_DIR="."
+    if confirm "Create config in /etc/swoops?" "n"; then
+        CONFIG_DIR="/etc/swoops"
+        sudo mkdir -p "$CONFIG_DIR"
+    else
+        prompt CONFIG_DIR "Configuration directory" "."
+        mkdir -p "$CONFIG_DIR"
+    fi
+else
+    # Non-interactive mode: use /etc/swoops
     CONFIG_DIR="/etc/swoops"
     sudo mkdir -p "$CONFIG_DIR"
-else
-    prompt CONFIG_DIR "Configuration directory" "."
-    mkdir -p "$CONFIG_DIR"
 fi
 
 # Server config
@@ -980,7 +1051,7 @@ fi
 echo
 
 # Step 7: Reverse proxy configuration
-if [ "$INSTALL_SERVER" = true ] && [ "$USE_REVERSE_PROXY" = true ]; then
+if [ "$SKIP_INTERACTIVE" = false ] && [ "$INSTALL_SERVER" = true ] && [ "$USE_REVERSE_PROXY" = true ]; then
     echo -e "${GREEN}Step 7: Reverse Proxy Configuration${NC}"
 
     echo "Choose reverse proxy:"
@@ -1218,10 +1289,42 @@ else
     echo
 fi
 
-# Step 9: Service installation
-echo -e "${GREEN}Step 9: Service Installation${NC}"
+# Download CA certificate if requested in non-interactive mode
+if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
+    info "Downloading CA certificate from $AGENT_HTTP_URL..."
 
-if confirm "Install as system service?" "y"; then
+    # Create cert directory
+    sudo mkdir -p /etc/swoops/certs
+
+    # Download the CA certificate
+    CA_URL="$AGENT_HTTP_URL/api/ca-cert"
+    if command -v curl &> /dev/null; then
+        if ! sudo curl -fsSL "$CA_URL" -o /etc/swoops/certs/server-ca.pem; then
+            error "Failed to download CA certificate from $CA_URL"
+            warn "You may need to manually copy the CA certificate"
+        else
+            success "Downloaded CA certificate to /etc/swoops/certs/server-ca.pem"
+        fi
+    elif command -v wget &> /dev/null; then
+        if ! sudo wget -q "$CA_URL" -O /etc/swoops/certs/server-ca.pem; then
+            error "Failed to download CA certificate from $CA_URL"
+            warn "You may need to manually copy the CA certificate"
+        else
+            success "Downloaded CA certificate to /etc/swoops/certs/server-ca.pem"
+        fi
+    fi
+
+    # Set proper permissions
+    sudo chmod 644 /etc/swoops/certs/server-ca.pem
+    echo
+fi
+
+# Step 9: Service installation
+if [ "$SKIP_INTERACTIVE" = false ]; then
+    echo -e "${GREEN}Step 9: Service Installation${NC}"
+fi
+
+if [ "$SKIP_INTERACTIVE" = true ] || confirm "Install as system service?" "y"; then
     if [ "$INSTALL_SERVER" = true ]; then
         if [ "$INIT_SYSTEM" = "systemd" ]; then
             SERVICE_FILE="/etc/systemd/system/swoopsd.service"
@@ -1397,6 +1500,32 @@ fi
 echo
 
 # Summary
+if [ "$SKIP_INTERACTIVE" = true ]; then
+    # Non-interactive summary
+    success "Agent installation complete!"
+    echo
+    info "Agent installed at: /usr/local/bin/swoops-agent"
+    info "Configuration: $AGENT_CONFIG"
+    info "Server: $CONTROL_PLANE_HOST:$CONTROL_PLANE_PORT"
+    info "Host ID: $HOST_ID"
+    echo
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        info "To start the agent: sudo systemctl start swoops-agent"
+        info "To enable on boot: sudo systemctl enable swoops-agent"
+        info "To check logs: sudo journalctl -u swoops-agent -f"
+    elif [ "$INIT_SYSTEM" = "launchd" ]; then
+        info "To start the agent: launchctl load $HOME/Library/LaunchAgents/com.swoops.agent.plist"
+    fi
+    echo
+    if [ "$AGENT_DOWNLOAD_CA" = true ]; then
+        info "Note: The agent will automatically download the CA certificate on first connection"
+        info "HTTP URL: $AGENT_HTTP_URL"
+    fi
+    echo
+    success "Happy orchestrating! 🚀"
+    exit 0
+fi
+
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}Setup Complete!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
