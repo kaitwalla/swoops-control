@@ -148,18 +148,35 @@ func runCommand(args []string) error {
 	versionInfo := version.Get()
 	log.Printf("swoops-agent starting: %s host_id=%s server=%s insecure=%v", versionInfo.String(), *hostID, *serverAddr, *insecure)
 
-	// Check for updates in background (don't block startup)
+	// Check for updates periodically in background
 	go func() {
-		checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		updateInfo, err := version.CheckForUpdates(checkCtx, "kaitwalla", "swoops-control")
-		if err != nil {
-			log.Printf("version check: failed to check for updates: %v", err)
-			return
+		checkForUpdate := func() {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			updateInfo, err := version.CheckForUpdates(checkCtx, "kaitwalla", "swoops-control")
+			if err != nil {
+				log.Printf("version check: failed to check for updates: %v", err)
+				return
+			}
+			if updateInfo.UpdateAvailable {
+				log.Printf("⚠️  Update available: v%s → v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
+				log.Printf("   Download: %s", updateInfo.UpdateURL)
+			}
 		}
-		if updateInfo.UpdateAvailable {
-			log.Printf("⚠️  Update available: v%s → v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
-			log.Printf("   Download: %s", updateInfo.UpdateURL)
+
+		// Check on startup
+		checkForUpdate()
+
+		// Check every 24 hours
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				checkForUpdate()
+			}
 		}
 	}()
 
