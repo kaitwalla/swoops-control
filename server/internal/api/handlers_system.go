@@ -55,25 +55,20 @@ func (s *Server) handleGetCACert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine which CA cert to serve
-	// For mTLS, we serve the client CA (which agents need to verify the server)
-	// For regular TLS, we serve the CA that signed the server cert
+	// Agents need the Root CA that signed the server certificate to verify the server's identity
+	// Note: This is NOT the ClientCA (which is used to verify client certificates in mTLS)
 	var certPath string
 
-	// First check if there's a client CA (mTLS setup)
-	if s.config.GRPC.ClientCA != "" {
-		certPath = s.config.GRPC.ClientCA
-	} else {
-		// Try to find the CA cert by looking in the same directory as the server cert
-		if s.config.GRPC.TLSCert != "" {
-			certDir := filepath.Dir(s.config.GRPC.TLSCert)
-			// Common CA cert names
-			possibleNames := []string{"ca-cert.pem", "server-ca.pem", "root_ca.crt", "ca.pem"}
-			for _, name := range possibleNames {
-				path := filepath.Join(certDir, name)
-				if _, err := os.Stat(path); err == nil {
-					certPath = path
-					break
-				}
+	// Try to find the Root CA cert by looking in the same directory as the server cert
+	if s.config.GRPC.TLSCert != "" {
+		certDir := filepath.Dir(s.config.GRPC.TLSCert)
+		// Common Root CA cert names (ordered by preference)
+		possibleNames := []string{"ca-cert.pem", "root_ca.crt", "server-ca.pem", "ca.pem"}
+		for _, name := range possibleNames {
+			path := filepath.Join(certDir, name)
+			if _, err := os.Stat(path); err == nil {
+				certPath = path
+				break
 			}
 		}
 	}

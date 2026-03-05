@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.3.4"
+SETUP_SCRIPT_VERSION="1.3.5"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -1575,7 +1575,7 @@ EOF
             # Source environment variables for plist
             source "$AGENT_CONFIG"
 
-            # Build program arguments array based on mTLS configuration
+            # Build program arguments array based on TLS/mTLS configuration
             if [ "$AGENT_MTLS_ENABLED" = true ]; then
                 PLIST_ARGS="        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
         <string>run</string>
@@ -1585,13 +1585,28 @@ EOF
         <string>$SWOOPS_HOST_ID</string>
         <string>--auth-token</string>
         <string>$SWOOPS_AUTH_TOKEN</string>
-        <string>--ca-cert</string>
+        <string>--insecure=false</string>
+        <string>--server-ca</string>
         <string>/etc/swoops/certs/server-ca.pem</string>
         <string>--tls-cert</string>
         <string>/etc/swoops/certs/client-cert.pem</string>
         <string>--tls-key</string>
         <string>/etc/swoops/certs/client-key.pem</string>"
+            elif [ "$SWOOPS_INSECURE" = "false" ]; then
+                # TLS enabled but no mTLS
+                PLIST_ARGS="        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
+        <string>run</string>
+        <string>--server</string>
+        <string>$SWOOPS_SERVER</string>
+        <string>--host-id</string>
+        <string>$SWOOPS_HOST_ID</string>
+        <string>--auth-token</string>
+        <string>$SWOOPS_AUTH_TOKEN</string>
+        <string>--insecure=false</string>
+        <string>--server-ca</string>
+        <string>$SWOOPS_SERVER_CA</string>"
             else
+                # No TLS (insecure mode)
                 PLIST_ARGS="        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
         <string>run</string>
         <string>--server</string>
