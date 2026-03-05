@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.3.0"
+SETUP_SCRIPT_VERSION="1.3.1"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -766,6 +766,11 @@ if [ "$SKIP_INTERACTIVE" = false ] && ([ "$GRPC_TLS_ENABLED" = true ] || [ "$USE
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/client-ca.pem"
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/server-ca.pem"
 
+        # Copy CA private key for client certificate generation
+        if [ -f "$STEP_CA_DIR/secrets/intermediate_ca_key" ]; then
+            sudo cp "$STEP_CA_DIR/secrets/intermediate_ca_key" "$CERT_DIR/client-ca-key.pem"
+        fi
+
         # Create swoops user if it doesn't exist (needed for certificate permissions)
         if ! id swoops &>/dev/null; then
             sudo useradd -r -s /bin/false swoops || true
@@ -993,6 +998,7 @@ EOF
             cat >> "$SERVER_CONFIG" <<EOF
   require_mtls: true
   client_ca: $GRPC_CLIENT_CA_PATH
+  client_ca_key: /etc/swoops/certs/client-ca-key.pem
 EOF
         else
             cat >> "$SERVER_CONFIG" <<EOF
