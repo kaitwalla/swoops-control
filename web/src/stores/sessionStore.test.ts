@@ -11,6 +11,7 @@ describe('sessionStore', () => {
     name: 'Test Session',
     host_id: 'host-1',
     template_id: 'template-1',
+    type: 'agent',
     agent_type: 'claude',
     status: 'running',
     prompt: 'Test prompt',

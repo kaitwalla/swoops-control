@@ -1,4 +1,5 @@
 export type AgentType = 'claude' | 'codex';
+export type SessionType = 'agent' | 'shell';
 export type SessionStatus = 'pending' | 'starting' | 'running' | 'idle' | 'stopping' | 'stopped' | 'failed';
 
 export interface Session {
@@ -6,14 +7,15 @@ export interface Session {
   name: string;
   host_id: string;
   template_id: string;
-  agent_type: AgentType;
+  type: SessionType;
+  agent_type?: AgentType;
   status: SessionStatus;
-  prompt: string;
-  branch_name: string;
-  worktree_path: string;
+  prompt?: string;
+  branch_name?: string;
+  worktree_path?: string;
   tmux_session: string;
   agent_pid: number;
-  model_override: string;
+  model_override?: string;
   env_vars: Record<string, string>;
   mcp_servers: unknown[];
   plugins: string[];
@@ -29,8 +31,9 @@ export interface Session {
 export interface CreateSessionRequest {
   name?: string;
   host_id: string;
-  agent_type: AgentType;
-  prompt: string;
+  type?: SessionType;
+  agent_type?: AgentType;
+  prompt?: string;
   branch_name?: string;
   template_id?: string;
   model_override?: string;

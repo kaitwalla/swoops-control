@@ -9,6 +9,13 @@ const (
 	AgentTypeCodex  AgentType = "codex"
 )
 
+type SessionType string
+
+const (
+	SessionTypeAgent SessionType = "agent" // Agent-based session (claude/codex in a repo)
+	SessionTypeShell SessionType = "shell" // Interactive shell session
+)
+
 type SessionStatus string
 
 const (
@@ -26,11 +33,12 @@ type Session struct {
 	Name            string            `json:"name" db:"name"`
 	HostID          string            `json:"host_id" db:"host_id"`
 	TemplateID      string            `json:"template_id,omitempty" db:"template_id"`
-	AgentType       AgentType         `json:"agent_type" db:"agent_type"`
+	Type            SessionType       `json:"type" db:"type"`
+	AgentType       AgentType         `json:"agent_type,omitempty" db:"agent_type"`
 	Status          SessionStatus     `json:"status" db:"status"`
-	Prompt          string            `json:"prompt" db:"prompt"`
-	BranchName      string            `json:"branch_name" db:"branch_name"`
-	WorktreePath    string            `json:"worktree_path" db:"worktree_path"`
+	Prompt          string            `json:"prompt,omitempty" db:"prompt"`
+	BranchName      string            `json:"branch_name,omitempty" db:"branch_name"`
+	WorktreePath    string            `json:"worktree_path,omitempty" db:"worktree_path"`
 	TmuxSessionName string            `json:"tmux_session" db:"tmux_session"`
 	AgentPID        int               `json:"agent_pid" db:"agent_pid"`
 	ModelOverride   string            `json:"model_override,omitempty" db:"model_override"`

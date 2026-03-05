@@ -112,7 +112,6 @@ func (m *Manager) StopSession(sess *models.Session, host *models.Host) error {
 	execFn := client.ExecFunc()
 
 	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
-	wtManager := &worktree.Manager{ExecFunc: execFn}
 
 	// Stop output streamer
 	m.mu.Lock()
@@ -133,8 +132,9 @@ func (m *Manager) StopSession(sess *models.Session, host *models.Host) error {
 		}
 	}
 
-	// Remove worktree
-	if sess.WorktreePath != "" {
+	// Remove worktree (only for agent sessions)
+	if sess.Type == models.SessionTypeAgent && sess.WorktreePath != "" {
+		wtManager := &worktree.Manager{ExecFunc: execFn}
 		if err := wtManager.Remove(host.BaseRepoPath, sess.WorktreePath); err != nil {
 			log.Printf("warn: remove worktree %s: %v", sess.WorktreePath, err)
 		}
@@ -307,15 +307,22 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 	execFn := client.ExecFunc()
 
 	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
-	wtManager := &worktree.Manager{ExecFunc: execFn}
 
-	// Compute paths
-	worktreePath := filepath.Join(host.WorktreeRoot, sess.Name)
+	// For shell sessions, use a simple working directory
+	var workDir string
+	if sess.Type == models.SessionTypeShell {
+		workDir = "~"
+	} else {
+		workDir = filepath.Join(host.WorktreeRoot, sess.Name)
+	}
+
 	tmuxSession := tmuxName(sess.ID)
 
 	// Update session to starting
 	sess.Status = models.SessionStatusStarting
-	sess.WorktreePath = worktreePath
+	if sess.Type == models.SessionTypeAgent {
+		sess.WorktreePath = workDir
+	}
 	sess.TmuxSessionName = tmuxSession
 	now := time.Now()
 	sess.StartedAt = &now
@@ -323,57 +330,75 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 		return fmt.Errorf("update session to starting: %w", err)
 	}
 
-	// 1. Ensure worktree root exists
-	if _, err := client.Exec(fmt.Sprintf("mkdir -p %s", shellQuote(host.WorktreeRoot))); err != nil {
-		m.failSession(sess, fmt.Errorf("create worktree root: %w", err))
-		return err
-	}
+	// For agent sessions, set up worktree and MCP config
+	if sess.Type == models.SessionTypeAgent {
+		wtManager := &worktree.Manager{ExecFunc: execFn}
 
-	// 2. Create git worktree
-	if err := wtManager.Create(host.BaseRepoPath, worktreePath, sess.BranchName); err != nil {
-		m.failSession(sess, fmt.Errorf("create worktree: %w", err))
-		return err
-	}
+		// 1. Ensure worktree root exists
+		if _, err := client.Exec(fmt.Sprintf("mkdir -p %s", shellQuote(host.WorktreeRoot))); err != nil {
+			m.failSession(sess, fmt.Errorf("create worktree root: %w", err))
+			return err
+		}
 
-	// 2.5. Generate and install MCP config
-	if err := m.installMCPConfigSSH(client, sess, host, worktreePath); err != nil {
-		log.Printf("warn: failed to install MCP config for session %s: %v", sess.ID, err)
-		// Non-fatal: continue session launch even if MCP config fails
+		// 2. Create git worktree
+		if err := wtManager.Create(host.BaseRepoPath, workDir, sess.BranchName); err != nil {
+			m.failSession(sess, fmt.Errorf("create worktree: %w", err))
+			return err
+		}
+
+		// 2.5. Generate and install MCP config
+		if err := m.installMCPConfigSSH(client, sess, host, workDir); err != nil {
+			log.Printf("warn: failed to install MCP config for session %s: %v", sess.ID, err)
+			// Non-fatal: continue session launch even if MCP config fails
+		}
 	}
 
 	// 3. Create tmux session
-	if err := tmuxRunner.CreateSession(tmuxSession, worktreePath); err != nil {
-		// Clean up worktree on failure
-		wtManager.Remove(host.BaseRepoPath, worktreePath)
+	if err := tmuxRunner.CreateSession(tmuxSession, workDir); err != nil {
+		// Clean up worktree on failure for agent sessions
+		if sess.Type == models.SessionTypeAgent {
+			wtManager := &worktree.Manager{ExecFunc: execFn}
+			wtManager.Remove(host.BaseRepoPath, workDir)
+		}
 		m.failSession(sess, fmt.Errorf("create tmux session: %w", err))
 		return err
 	}
 
-	// 4. Build the agent command
-	agentCmd := buildAgentCommand(sess)
-
-	// 5. Launch agent in tmux
-	if err := tmuxRunner.SendKeys(tmuxSession, agentCmd); err != nil {
-		tmuxRunner.KillSession(tmuxSession)
-		wtManager.Remove(host.BaseRepoPath, worktreePath)
-		m.failSession(sess, fmt.Errorf("launch agent: %w", err))
-		return err
+	// 4. For agent sessions, build and launch the agent command
+	if sess.Type == models.SessionTypeAgent {
+		agentCmd := buildAgentCommand(sess)
+		if err := tmuxRunner.SendKeys(tmuxSession, agentCmd); err != nil {
+			tmuxRunner.KillSession(tmuxSession)
+			wtManager := &worktree.Manager{ExecFunc: execFn}
+			wtManager.Remove(host.BaseRepoPath, workDir)
+			m.failSession(sess, fmt.Errorf("launch agent: %w", err))
+			return err
+		}
+	} else if sess.Prompt != "" {
+		// For shell sessions with an initial prompt, send it
+		if err := tmuxRunner.SendKeys(tmuxSession, sess.Prompt); err != nil {
+			log.Printf("warn: failed to send initial prompt to shell session %s: %v", sess.ID, err)
+		}
 	}
 
-	// 6. Update session to running
+	// 5. Update session to running
 	sess.Status = models.SessionStatusRunning
 	if err := m.store.UpdateSession(sess); err != nil {
 		return fmt.Errorf("update session to running: %w", err)
 	}
 
-	// 7. Start output streamer
+	// 6. Start output streamer
 	streamer := NewOutputStreamer(sess.ID, tmuxSession, tmuxRunner, m.store)
 	m.mu.Lock()
 	m.outputs[sess.ID] = streamer
 	m.mu.Unlock()
 	streamer.Start()
 
-	log.Printf("session %s launched on host %s (tmux: %s, worktree: %s)", sess.ID, host.Name, tmuxSession, worktreePath)
+	if sess.Type == models.SessionTypeShell {
+		log.Printf("shell session %s launched on host %s (tmux: %s)", sess.ID, host.Name, tmuxSession)
+	} else {
+		log.Printf("agent session %s launched on host %s (tmux: %s, worktree: %s)", sess.ID, host.Name, tmuxSession, workDir)
+	}
 	return nil
 }
 

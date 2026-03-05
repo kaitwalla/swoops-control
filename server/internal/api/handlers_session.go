@@ -16,6 +16,7 @@ import (
 type createSessionRequest struct {
 	Name          string            `json:"name"`
 	HostID        string            `json:"host_id"`
+	Type          models.SessionType `json:"type"`
 	AgentType     models.AgentType  `json:"agent_type"`
 	Prompt        string            `json:"prompt"`
 	BranchName    string            `json:"branch_name"`
@@ -90,14 +91,32 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.HostID == "" || req.AgentType == "" || req.Prompt == "" {
-		writeError(w, http.StatusBadRequest, "host_id, agent_type, and prompt are required")
+	if req.HostID == "" {
+		writeError(w, http.StatusBadRequest, "host_id is required")
 		return
 	}
 
-	if req.AgentType != models.AgentTypeClaude && req.AgentType != models.AgentTypeCodex {
-		writeError(w, http.StatusBadRequest, "agent_type must be 'claude' or 'codex'")
+	// Default to agent type if not specified
+	if req.Type == "" {
+		req.Type = models.SessionTypeAgent
+	}
+
+	// Validate session type
+	if req.Type != models.SessionTypeAgent && req.Type != models.SessionTypeShell {
+		writeError(w, http.StatusBadRequest, "type must be 'agent' or 'shell'")
 		return
+	}
+
+	// For agent sessions, agent_type is required
+	if req.Type == models.SessionTypeAgent {
+		if req.AgentType == "" {
+			writeError(w, http.StatusBadRequest, "agent_type is required for agent sessions")
+			return
+		}
+		if req.AgentType != models.AgentTypeClaude && req.AgentType != models.AgentTypeCodex {
+			writeError(w, http.StatusBadRequest, "agent_type must be 'claude' or 'codex'")
+			return
+		}
 	}
 
 	// Verify host exists
@@ -112,15 +131,16 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name == "" {
-		req.Name = string(req.AgentType) + "-" + models.NewID()[:8]
+		if req.Type == models.SessionTypeShell {
+			req.Name = "shell-" + models.NewID()[:8]
+		} else {
+			req.Name = string(req.AgentType) + "-" + models.NewID()[:8]
+		}
 	}
 	// Validate session name to prevent path traversal attacks
 	if !validateSessionName(req.Name) {
 		writeError(w, http.StatusBadRequest, "session name contains invalid characters or path traversal sequences")
 		return
-	}
-	if req.BranchName == "" {
-		req.BranchName = "swoops/" + req.Name
 	}
 	if req.EnvVars == nil {
 		req.EnvVars = make(map[string]string)
@@ -137,6 +157,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Name:          req.Name,
 		HostID:        req.HostID,
 		TemplateID:    req.TemplateID,
+		Type:          req.Type,
 		AgentType:     req.AgentType,
 		Status:        models.SessionStatusPending,
 		Prompt:        req.Prompt,

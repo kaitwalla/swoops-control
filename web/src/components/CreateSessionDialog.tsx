@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import type { CreateSessionRequest, AgentType, Session } from '../types/session';
+import type { CreateSessionRequest, AgentType, SessionType, Session } from '../types/session';
 import type { Host } from '../types/host';
 import { hostsApi } from '../api/hosts';
 import { sessionsApi } from '../api/sessions';
@@ -22,6 +22,7 @@ export function CreateSessionDialog({ open, onClose, onSubmit, preselectedHostId
   const [existingSessions, setExistingSessions] = useState<Session[]>([]);
   const [hostId, setHostId] = useState(preselectedHostId || '');
   const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [sessionType, setSessionType] = useState<SessionType>('agent');
   const [agentType, setAgentType] = useState<AgentType>('claude');
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
@@ -74,8 +75,9 @@ export function CreateSessionDialog({ open, onClose, onSubmit, preselectedHostId
         // Create new session
         await onSubmit({
           host_id: hostId,
-          agent_type: agentType,
-          prompt,
+          type: sessionType,
+          agent_type: sessionType === 'agent' ? agentType : undefined,
+          prompt: prompt || undefined,
           name: name || undefined,
           branch_name: branchName || undefined,
           model_override: modelOverride || undefined,
@@ -189,25 +191,38 @@ export function CreateSessionDialog({ open, onClose, onSubmit, preselectedHostId
             /* Create Mode: Full Form */
             <>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Agent Type *</label>
+                <label className="block text-sm text-gray-400 mb-1">Session Type *</label>
                 <select
-                  value={agentType}
-                  onChange={(e) => setAgentType(e.target.value as AgentType)}
+                  value={sessionType}
+                  onChange={(e) => setSessionType(e.target.value as SessionType)}
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
                 >
-                  <option value="claude">Claude Code</option>
-                  <option value="codex">Codex</option>
+                  <option value="agent">Agent Session (Claude Code / Codex in a repo)</option>
+                  <option value="shell">Interactive Shell</option>
                 </select>
               </div>
 
+              {sessionType === 'agent' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Agent Type *</label>
+                  <select
+                    value={agentType}
+                    onChange={(e) => setAgentType(e.target.value as AgentType)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="claude">Claude Code</option>
+                    <option value="codex">Codex</option>
+                  </select>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Initial Prompt *</label>
+                <label className="block text-sm text-gray-400 mb-1">Initial Prompt</label>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm min-h-[100px]"
-                  placeholder="Describe the task for the AI agent..."
-                  required
+                  placeholder="Optional: Describe an initial task, or leave empty to start an interactive session"
                 />
               </div>
 
@@ -221,26 +236,30 @@ export function CreateSessionDialog({ open, onClose, onSubmit, preselectedHostId
                     placeholder="Auto-generated if empty"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Branch Name</label>
-                  <input
-                    value={branchName}
-                    onChange={(e) => setBranchName(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                    placeholder="swoops/<session-name>"
-                  />
-                </div>
+                {sessionType === 'agent' && (
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Branch Name</label>
+                    <input
+                      value={branchName}
+                      onChange={(e) => setBranchName(e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                      placeholder="Optional: e.g., feature/my-work"
+                    />
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Model Override</label>
-                <input
-                  value={modelOverride}
-                  onChange={(e) => setModelOverride(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                  placeholder="e.g., claude-sonnet-4-20250514"
-                />
-              </div>
+              {sessionType === 'agent' && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Model Override</label>
+                  <input
+                    value={modelOverride}
+                    onChange={(e) => setModelOverride(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                    placeholder="e.g., claude-sonnet-4-20250514"
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -256,7 +275,7 @@ export function CreateSessionDialog({ open, onClose, onSubmit, preselectedHostId
             </button>
             <button
               type="submit"
-              disabled={loading || !hostId || !prompt.trim() || (mode === 'join' && !selectedSessionId)}
+              disabled={loading || !hostId || (mode === 'join' && (!selectedSessionId || !prompt.trim()))}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (mode === 'join' ? 'Joining...' : 'Creating...') : (mode === 'join' ? 'Join & Send' : 'Create Session')}
