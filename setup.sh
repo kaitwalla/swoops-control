@@ -1360,35 +1360,52 @@ if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
         fi
 
         if [ -n "$CLIENT_CERT_JSON" ]; then
-            # Extract cert and key from JSON (using grep and sed for portability)
-            # Expected format: {"client_cert":"-----BEGIN CERTIFICATE-----\n...","client_key":"-----BEGIN EC PRIVATE KEY-----\n..."}
-
-            # Extract client_cert field and decode escaped newlines
-            CLIENT_CERT=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_cert":"[^"]*"' | sed 's/"client_cert":"//;s/"$//' | sed 's/\\n/\n/g')
-            CLIENT_KEY=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_key":"[^"]*"' | sed 's/"client_key":"//;s/"$//' | sed 's/\\n/\n/g')
-
-            if [ -n "$CLIENT_CERT" ] && [ -n "$CLIENT_KEY" ]; then
-                # Write to temp files first, then move with sudo
-                TEMP_CERT=$(mktemp)
-                TEMP_KEY=$(mktemp)
-
-                echo "$CLIENT_CERT" > "$TEMP_CERT"
-                echo "$CLIENT_KEY" > "$TEMP_KEY"
-
-                sudo mv "$TEMP_CERT" /etc/swoops/certs/client-cert.pem
-                sudo mv "$TEMP_KEY" /etc/swoops/certs/client-key.pem
-
-                sudo chmod 644 /etc/swoops/certs/client-cert.pem
-                sudo chmod 600 /etc/swoops/certs/client-key.pem  # Private key should be restricted
-
-                success "Downloaded client certificates for mTLS"
-                AGENT_MTLS_ENABLED=true
-            else
-                warn "Failed to parse client certificates from server response"
+            # Check if response is an error message
+            if echo "$CLIENT_CERT_JSON" | grep -q '"error"'; then
+                ERROR_MSG=$(echo "$CLIENT_CERT_JSON" | grep -o '"error":"[^"]*"' | sed 's/"error":"//;s/"$//')
+                warn "Server returned error: $ERROR_MSG"
+                if echo "$ERROR_MSG" | grep -qi "internal"; then
+                    echo
+                    error "Server configuration issue detected. The server needs:"
+                    echo "  1. Update to v1.2.8 or later"
+                    echo "  2. Add to config.yaml:"
+                    echo "     grpc:"
+                    echo "       client_ca_key: /etc/swoops/certs/client-ca-key.pem"
+                    echo "  3. Restart swoopsd"
+                    echo
+                fi
                 AGENT_MTLS_ENABLED=false
+            else
+                # Extract cert and key from JSON (using grep and sed for portability)
+                # Expected format: {"client_cert":"-----BEGIN CERTIFICATE-----\n...","client_key":"-----BEGIN EC PRIVATE KEY-----\n..."}
+
+                # Extract client_cert field and decode escaped newlines
+                CLIENT_CERT=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_cert":"[^"]*"' | sed 's/"client_cert":"//;s/"$//' | sed 's/\\n/\n/g')
+                CLIENT_KEY=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_key":"[^"]*"' | sed 's/"client_key":"//;s/"$//' | sed 's/\\n/\n/g')
+
+                if [ -n "$CLIENT_CERT" ] && [ -n "$CLIENT_KEY" ]; then
+                    # Write to temp files first, then move with sudo
+                    TEMP_CERT=$(mktemp)
+                    TEMP_KEY=$(mktemp)
+
+                    echo "$CLIENT_CERT" > "$TEMP_CERT"
+                    echo "$CLIENT_KEY" > "$TEMP_KEY"
+
+                    sudo mv "$TEMP_CERT" /etc/swoops/certs/client-cert.pem
+                    sudo mv "$TEMP_KEY" /etc/swoops/certs/client-key.pem
+
+                    sudo chmod 644 /etc/swoops/certs/client-cert.pem
+                    sudo chmod 600 /etc/swoops/certs/client-key.pem  # Private key should be restricted
+
+                    success "Downloaded client certificates for mTLS"
+                    AGENT_MTLS_ENABLED=true
+                else
+                    warn "Failed to parse client certificates from server response"
+                    AGENT_MTLS_ENABLED=false
+                fi
             fi
         else
-            warn "Failed to download client certificates"
+            warn "Failed to download client certificates (server may not be configured for mTLS)"
             AGENT_MTLS_ENABLED=false
         fi
     else
