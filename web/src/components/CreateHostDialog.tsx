@@ -61,8 +61,9 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
         name: hostName
       });
 
-      // Build setup command with credentials
-      let setupCmd = `curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash -s --`;
+      // Build setup command with credentials (add timestamp to bypass caching)
+      const timestamp = Date.now();
+      let setupCmd = `curl -fsSL "https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh?${timestamp}" | bash -s --`;
 
       // Fetch server info to get server address
       const serverInfo = await api.get<ServerInfo>('/server-info');
