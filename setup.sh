@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.3.2"
+SETUP_SCRIPT_VERSION="1.3.3"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -761,9 +761,9 @@ if [ "$SKIP_INTERACTIVE" = false ] && ([ "$GRPC_TLS_ENABLED" = true ] || [ "$USE
             rmdir "$TEMP_CERT_DIR"
         fi
 
-        # Copy root CA certificate
+        # Copy CA certificates
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/ca-cert.pem"
-        sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/client-ca.pem"
+        sudo cp "$STEP_CA_DIR/certs/intermediate_ca.crt" "$CERT_DIR/client-ca.pem"  # Use intermediate CA for client cert signing
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/server-ca.pem"
 
         # Copy and decrypt CA private key for client certificate generation
