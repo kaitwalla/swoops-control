@@ -40,5 +40,7 @@ export const useHostStore = create<HostStore>((set, get) => ({
 
   triggerUpdate: async (id: string) => {
     await hostsApi.triggerUpdate(id);
+    // Refresh hosts to get updated state
+    await get().fetchHosts();
   },
 }));

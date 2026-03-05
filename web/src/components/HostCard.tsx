@@ -13,12 +13,16 @@ interface HostCardProps {
 
 export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardProps) {
   const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const handleUpdate = async () => {
     setUpdating(true);
+    setUpdateError(null);
     try {
       await onUpdate(host.id);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to trigger update';
+      setUpdateError(errorMessage);
       console.error('Failed to trigger update:', error);
     } finally {
       setUpdating(false);
@@ -38,9 +42,14 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardPro
         <div>{host.hostname}:{host.ssh_port}</div>
         <div>{host.ssh_user}@{host.os || 'unknown'}/{host.arch || 'unknown'}</div>
         <div>{sessionCount} session{sessionCount !== 1 ? 's' : ''} / {host.max_sessions} max</div>
-        {host.update_available && (
+        {host.update_available && host.latest_version && (
           <div className="text-yellow-500 text-xs">
             Update available: v{host.latest_version}
+          </div>
+        )}
+        {updateError && (
+          <div className="text-red-400 text-xs">
+            {updateError}
           </div>
         )}
       </div>
@@ -58,6 +67,7 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardPro
             disabled={updating || host.status !== 'online'}
             className="text-gray-500 hover:text-yellow-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={updating ? 'Updating...' : 'Update agent'}
+            aria-label={updating ? 'Updating agent' : 'Update agent'}
           >
             <Download size={14} className={updating ? 'animate-pulse' : ''} />
           </button>
@@ -65,6 +75,7 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardPro
         <button
           onClick={() => onDelete(host.id)}
           className="text-gray-500 hover:text-red-400 transition-colors"
+          aria-label="Delete host"
         >
           <Trash2 size={14} />
         </button>

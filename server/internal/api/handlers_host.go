@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
 	"github.com/kaitwalla/swoops-control/pkg/models"
 	"github.com/kaitwalla/swoops-control/server/internal/certgen"
 )
@@ -358,7 +359,7 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.sessionMgr.SendAgentCommand(hostID, "update_agent", nil); err != nil {
+	if err := s.sessionMgr.SendAgentCommand(hostID, agentrpc.CommandUpdateAgent, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to send update command: %v", err))
 		return
 	}

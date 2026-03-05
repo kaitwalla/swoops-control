@@ -588,7 +588,10 @@ func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
 	defer os.Remove(tmpPath) // Clean up if we fail
 
 	log.Printf("Downloading update from %s", updateInfo.UpdateURL)
-	resp, err := http.Get(updateInfo.UpdateURL)
+
+	// Use HTTP client with timeout to prevent hanging
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(updateInfo.UpdateURL)
 	if err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("download update: %w", err)
@@ -626,7 +629,9 @@ func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
 	// Move new binary into place
 	if err := os.Rename(tmpPath, currentPath); err != nil {
 		// Restore backup on failure
-		os.Rename(backupPath, currentPath)
+		if restoreErr := os.Rename(backupPath, currentPath); restoreErr != nil {
+			return fmt.Errorf("install new binary: %w (CRITICAL: backup restore also failed: %v)", err, restoreErr)
+		}
 		return fmt.Errorf("install new binary: %w", err)
 	}
 
