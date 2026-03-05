@@ -1343,13 +1343,16 @@ if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
     if [ -n "$AGENT_HOST_ID" ] && [ -n "$AGENT_AUTH_TOKEN_ARG" ]; then
         info "Downloading client certificates for mTLS..."
 
-        CLIENT_CERT_URL="$AGENT_HTTP_URL/api/v1/hosts/$AGENT_HOST_ID/client-cert?auth_token=$AGENT_AUTH_TOKEN_ARG"
+        CLIENT_CERT_URL="$AGENT_HTTP_URL/api/v1/hosts/$AGENT_HOST_ID/client-cert"
 
-        # Download client cert and key as JSON
+        # Download client cert and key as JSON using POST with auth token in body
         if command -v curl &> /dev/null; then
-            CLIENT_CERT_JSON=$(curl -fsSL "$CLIENT_CERT_URL")
+            CLIENT_CERT_JSON=$(curl -fsSL -X POST "$CLIENT_CERT_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"auth_token\":\"$AGENT_AUTH_TOKEN_ARG\"}")
         elif command -v wget &> /dev/null; then
-            CLIENT_CERT_JSON=$(wget -qO- "$CLIENT_CERT_URL")
+            CLIENT_CERT_JSON=$(wget -qO- --post-data="{\"auth_token\":\"$AGENT_AUTH_TOKEN_ARG\"}" \
+                --header="Content-Type: application/json" "$CLIENT_CERT_URL")
         else
             error "Neither curl nor wget found - cannot download client certificates"
             warn "You may need to manually configure client certificates"

@@ -262,13 +262,23 @@ func (s *Server) generateClientCert(hostID string) (certPEM, keyPEM []byte, err 
 	)
 }
 
-// handleGetClientCert returns client certificates for a host (one-time use, requires auth token)
+type clientCertRequest struct {
+	AuthToken string `json:"auth_token"`
+}
+
+// handleGetClientCert returns client certificates for a host (single-use, requires auth token in body)
 func (s *Server) handleGetClientCert(w http.ResponseWriter, r *http.Request) {
 	hostID := chi.URLParam(r, "id")
-	authToken := r.URL.Query().Get("auth_token")
 
-	if authToken == "" {
-		writeError(w, http.StatusUnauthorized, "auth_token query parameter is required")
+	// Parse request body for auth token
+	var req clientCertRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.AuthToken == "" {
+		writeError(w, http.StatusUnauthorized, "auth_token is required")
 		return
 	}
 
@@ -283,14 +293,27 @@ func (s *Server) handleGetClientCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if host.AgentAuthToken != authToken {
+	if host.AgentAuthToken != req.AuthToken {
 		writeError(w, http.StatusUnauthorized, "invalid auth token")
+		return
+	}
+
+	// Check if cert has already been downloaded (single-use protection)
+	if host.CertDownloaded {
+		writeError(w, http.StatusForbidden, "client certificate has already been downloaded for this host")
 		return
 	}
 
 	// Generate client certificate
 	certPEM, keyPEM, err := s.generateClientCert(hostID)
 	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	// Mark cert as downloaded
+	host.CertDownloaded = true
+	if err := s.store.UpdateHost(host); err != nil {
 		writeInternalError(w, err)
 		return
 	}

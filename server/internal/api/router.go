@@ -119,8 +119,8 @@ func (s *Server) setupRoutes() {
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
 
-		// Client cert download (uses auth token for authentication)
-		r.Get("/hosts/{id}/client-cert", s.handleGetClientCert)
+		// Client cert download (uses auth token for authentication, POST to avoid token in URL)
+		r.Post("/hosts/{id}/client-cert", s.handleGetClientCert)
 
 		// All other API routes require authentication
 		r.Group(func(r chi.Router) {
