@@ -152,7 +152,7 @@ func runCommand(args []string) error {
 	go func() {
 		checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		updateInfo, err := version.CheckForUpdates(checkCtx, "anthropics", "swoops-control")
+		updateInfo, err := version.CheckForUpdates(checkCtx, "kaitwalla", "swoops-control")
 		if err != nil {
 			log.Printf("version check: failed to check for updates: %v", err)
 			return
