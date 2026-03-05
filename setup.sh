@@ -1495,20 +1495,17 @@ EOF
         <string>$SWOOPS_SERVER</string>
         <string>--host-id</string>
         <string>$SWOOPS_HOST_ID</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>SWOOPS_AGENT_TOKEN</key>
+        <string>--auth-token</string>
         <string>$SWOOPS_AUTH_TOKEN</string>
-    </dict>
+    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/swoops-agent.log</string>
+    <string>$HOME/Library/Logs/swoops-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/swoops-agent.error.log</string>
+    <string>$HOME/Library/Logs/swoops-agent.error.log</string>
 </dict>
 </plist>
 EOF
