@@ -1,9 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -93,4 +95,57 @@ func (s *Server) handleGetCACert(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=\"ca-cert.pem\"")
 	w.WriteHeader(http.StatusOK)
 	w.Write(certData)
+}
+
+// handleGetServerInfo returns server configuration information needed for agent setup
+func (s *Server) handleGetServerInfo(w http.ResponseWriter, r *http.Request) {
+	// Determine the gRPC server address
+	grpcHost := s.config.GRPC.Host
+	if grpcHost == "0.0.0.0" || grpcHost == "" {
+		// Get the hostname from the request or use external URL
+		if s.config.Server.ExternalURL != "" {
+			// Extract hostname from external URL
+			url := s.config.Server.ExternalURL
+			url = strings.TrimPrefix(url, "http://")
+			url = strings.TrimPrefix(url, "https://")
+			if idx := strings.Index(url, ":"); idx != -1 {
+				grpcHost = url[:idx]
+			} else if idx := strings.Index(url, "/"); idx != -1 {
+				grpcHost = url[:idx]
+			} else {
+				grpcHost = url
+			}
+		} else {
+			grpcHost = r.Host
+			if idx := strings.Index(grpcHost, ":"); idx != -1 {
+				grpcHost = grpcHost[:idx]
+			}
+		}
+	}
+
+	grpcAddr := fmt.Sprintf("%s:%d", grpcHost, s.config.GRPC.Port)
+
+	// Determine the HTTP URL for downloading CA cert
+	httpURL := s.config.Server.ExternalURL
+	if httpURL == "" {
+		scheme := "http"
+		if s.config.Server.TLSEnabled || s.config.Server.AutocertEnabled {
+			scheme = "https"
+		}
+		httpURL = fmt.Sprintf("%s://%s", scheme, r.Host)
+	}
+
+	// Generate setup command
+	setupCmd := fmt.Sprintf("curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash -s -- --server %s", grpcAddr)
+
+	if !s.config.GRPC.Insecure {
+		setupCmd += fmt.Sprintf(" --download-ca --http-url %s", httpURL)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"grpc_address": grpcAddr,
+		"grpc_secure":  !s.config.GRPC.Insecure,
+		"http_url":     httpURL,
+		"setup_command": setupCmd,
+	})
 }

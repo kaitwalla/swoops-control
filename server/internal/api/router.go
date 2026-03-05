@@ -124,6 +124,7 @@ func (s *Server) setupRoutes() {
 			r.Use(s.HybridAuth())
 
 			r.Get("/stats", s.handleStats)
+			r.Get("/server-info", s.handleGetServerInfo)
 
 			// User management (current user - available to all authenticated users)
 			r.Get("/auth/me", s.handleGetCurrentUser)

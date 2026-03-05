@@ -1,11 +1,19 @@
-import { useState } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Copy, Check } from 'lucide-react';
 import type { CreateHostRequest } from '../types/host';
+import { api } from '../api/client';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onSubmit: (data: CreateHostRequest) => Promise<void>;
+}
+
+interface ServerInfo {
+  grpc_address: string;
+  grpc_secure: boolean;
+  http_url: string;
+  setup_command: string;
 }
 
 export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
@@ -22,8 +30,28 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      api.get<ServerInfo>('/server-info')
+        .then(setServerInfo)
+        .catch(err => console.error('Failed to fetch server info:', err));
+    }
+  }, [open]);
 
   if (!open) return null;
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,12 +72,43 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-gray-800 rounded-lg w-full max-w-lg p-6">
+      <div className="bg-gray-900 border border-gray-800 rounded-lg w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Add Host</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
             <X size={18} />
           </button>
+        </div>
+
+        {serverInfo && (
+          <div className="mb-6 p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
+            <h3 className="text-sm font-semibold text-blue-400 mb-2">Quick Setup</h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Run this command on your remote machine to automatically install and configure the agent:
+            </p>
+            <div className="flex items-start gap-2 bg-gray-950 rounded p-3 font-mono text-xs">
+              <code className="flex-1 break-all text-gray-300">{serverInfo.setup_command}</code>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(serverInfo.setup_command)}
+                className="flex-shrink-0 p-1.5 hover:bg-gray-800 rounded transition-colors"
+                title="Copy to clipboard"
+              >
+                {copied ? (
+                  <Check size={14} className="text-green-400" />
+                ) : (
+                  <Copy size={14} className="text-gray-400" />
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              After setup, the agent will connect to: <span className="text-gray-400 font-mono">{serverInfo.grpc_address}</span>
+            </p>
+          </div>
+        )}
+
+        <div className="mb-4 pb-4 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-400">Or configure manually:</h3>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
