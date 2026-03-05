@@ -22,6 +22,9 @@ export interface Host {
   arch: string;
   status: HostStatus;
   agent_version: string;
+  update_available: boolean;
+  latest_version?: string;
+  update_url?: string;
   labels: Record<string, string>;
   max_sessions: number;
   base_repo_path: string;

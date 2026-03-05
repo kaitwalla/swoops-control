@@ -444,6 +444,8 @@ func (a *agentRuntime) handleControlMessage(msg *agentrpc.ControlEnvelope) error
 		err = a.handleStop(cmd)
 	case agentrpc.CommandInput:
 		err = a.handleInput(cmd)
+	case agentrpc.CommandUpdateAgent:
+		err = a.handleUpdateAgent(cmd)
 	default:
 		return a.sendCommandResult(cmd, true, "")
 	}
@@ -563,6 +565,77 @@ func (a *agentRuntime) handleInput(cmd *agentrpc.SessionCommand) error {
 	if err := a.tmux.SendKeys(tmuxSession, input); err != nil {
 		return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("send input: %w", err))
 	}
+	return nil
+}
+
+func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
+	log.Printf("Received update command")
+
+	// Get update info from runtime
+	updateInfo := a.getUpdateInfo()
+	if updateInfo == nil || !updateInfo.UpdateAvailable {
+		return fmt.Errorf("no update available")
+	}
+
+	log.Printf("Starting agent update from v%s to v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
+
+	// Download new binary
+	tmpFile, err := os.CreateTemp("", "swoops-agent-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath) // Clean up if we fail
+
+	log.Printf("Downloading update from %s", updateInfo.UpdateURL)
+	resp, err := http.Get(updateInfo.UpdateURL)
+	if err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("download update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		tmpFile.Close()
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("write update: %w", err)
+	}
+	tmpFile.Close()
+
+	// Make the new binary executable
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		return fmt.Errorf("chmod new binary: %w", err)
+	}
+
+	// Get path to current executable
+	currentPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("get current executable path: %w", err)
+	}
+
+	// Backup current binary
+	backupPath := currentPath + ".backup"
+	if err := os.Rename(currentPath, backupPath); err != nil {
+		return fmt.Errorf("backup current binary: %w", err)
+	}
+
+	// Move new binary into place
+	if err := os.Rename(tmpPath, currentPath); err != nil {
+		// Restore backup on failure
+		os.Rename(backupPath, currentPath)
+		return fmt.Errorf("install new binary: %w", err)
+	}
+
+	// Remove backup
+	os.Remove(backupPath)
+
+	log.Printf("✅ Agent updated successfully to v%s - restart required", updateInfo.LatestVersion)
+	log.Printf("   The agent will need to be restarted for the update to take effect")
+
 	return nil
 }
 

@@ -15,7 +15,7 @@ interface Stats {
 }
 
 export function Dashboard() {
-  const { hosts, fetchHosts, deleteHost } = useHostStore();
+  const { hosts, fetchHosts, deleteHost, triggerUpdate } = useHostStore();
   const { sessions, fetchSessions } = useSessionStore();
   const [stats, setStats] = useState<Stats | null>(null);
 
@@ -68,6 +68,7 @@ export function Dashboard() {
                 host={host}
                 sessionCount={sessionCountByHost[host.id] || 0}
                 onDelete={deleteHost}
+                onUpdate={triggerUpdate}
               />
             ))}
           </div>

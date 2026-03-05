@@ -16,6 +16,7 @@ const mockHost: Host = {
   arch: 'x86_64',
   status: 'online',
   agent_version: '1.0.0',
+  update_available: false,
   labels: { env: 'test', region: 'us-west' },
   max_sessions: 5,
   base_repo_path: '/repos',
@@ -35,7 +36,8 @@ const renderWithRouter = (ui: React.ReactElement) => {
 describe('HostCard', () => {
   it('should render host name and status', () => {
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} />);
+    const onUpdate = vi.fn();
+    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} onUpdate={onUpdate} />);
 
     expect(screen.getByText('Test Host')).toBeInTheDocument();
     expect(screen.getByText('online')).toBeInTheDocument();
@@ -43,7 +45,7 @@ describe('HostCard', () => {
 
   it('should render host connection details', () => {
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.getByText('test.example.com:22')).toBeInTheDocument();
     expect(screen.getByText('testuser@linux/x86_64')).toBeInTheDocument();
@@ -51,21 +53,21 @@ describe('HostCard', () => {
 
   it('should render session count with singular form', () => {
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={mockHost} sessionCount={1} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={mockHost} sessionCount={1} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.getByText('1 session / 5 max')).toBeInTheDocument();
   });
 
   it('should render session count with plural form', () => {
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={mockHost} sessionCount={3} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={mockHost} sessionCount={3} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.getByText('3 sessions / 5 max')).toBeInTheDocument();
   });
 
   it('should render host labels', () => {
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={mockHost} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.getByText('env=test')).toBeInTheDocument();
     expect(screen.getByText('region=us-west')).toBeInTheDocument();
@@ -74,7 +76,7 @@ describe('HostCard', () => {
   it('should render without labels when labels object is empty', () => {
     const hostWithoutLabels = { ...mockHost, labels: {} };
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={hostWithoutLabels} sessionCount={2} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={hostWithoutLabels} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.queryByText(/env=/)).not.toBeInTheDocument();
   });
@@ -82,7 +84,7 @@ describe('HostCard', () => {
   it('should link to host detail page', () => {
     const onDelete = vi.fn();
     const { container } = renderWithRouter(
-      <HostCard host={mockHost} sessionCount={2} onDelete={onDelete} />
+      <HostCard host={mockHost} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />
     );
 
     const link = container.querySelector('a[href="/hosts/host-1"]');
@@ -93,7 +95,7 @@ describe('HostCard', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
     const { container } = renderWithRouter(
-      <HostCard host={mockHost} sessionCount={2} onDelete={onDelete} />
+      <HostCard host={mockHost} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />
     );
 
     // Find delete button (has Trash2 icon)
@@ -113,7 +115,7 @@ describe('HostCard', () => {
       arch: '',
     };
     const onDelete = vi.fn();
-    renderWithRouter(<HostCard host={hostWithoutOsArch} sessionCount={2} onDelete={onDelete} />);
+    renderWithRouter(<HostCard host={hostWithoutOsArch} sessionCount={2} onDelete={onDelete} onUpdate={vi.fn()} />);
 
     expect(screen.getByText('testuser@unknown/unknown')).toBeInTheDocument();
   });

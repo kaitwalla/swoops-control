@@ -9,6 +9,7 @@ interface HostStore {
   fetchHosts: () => Promise<void>;
   createHost: (data: CreateHostRequest) => Promise<Host>;
   deleteHost: (id: string) => Promise<void>;
+  triggerUpdate: (id: string) => Promise<void>;
 }
 
 export const useHostStore = create<HostStore>((set, get) => ({
@@ -35,5 +36,9 @@ export const useHostStore = create<HostStore>((set, get) => ({
   deleteHost: async (id: string) => {
     await hostsApi.del(id);
     set({ hosts: get().hosts.filter((h) => h.id !== id) });
+  },
+
+  triggerUpdate: async (id: string) => {
+    await hostsApi.triggerUpdate(id);
   },
 }));

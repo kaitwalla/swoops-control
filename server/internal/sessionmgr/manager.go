@@ -35,6 +35,7 @@ type AgentController interface {
 	LaunchSession(sess *models.Session, host *models.Host) error
 	StopSession(sess *models.Session, host *models.Host) error
 	SendInput(sess *models.Session, host *models.Host, input string) error
+	SendCommand(hostID, command string, args map[string]string) error
 }
 
 // New creates a new session manager.
@@ -548,4 +549,17 @@ func generateCodexMCPConfig(sessionID, serverAddr, apiKey string) (string, error
 		return "", fmt.Errorf("marshal JSON: %w", err)
 	}
 	return string(data), nil
+}
+
+// SendAgentCommand sends a command to an agent on the specified host.
+func (m *Manager) SendAgentCommand(hostID, command string, args map[string]string) error {
+	m.mu.Lock()
+	controller := m.agentController
+	m.mu.Unlock()
+
+	if controller == nil {
+		return fmt.Errorf("agent controller not set")
+	}
+
+	return controller.SendCommand(hostID, command, args)
 }

@@ -1,15 +1,30 @@
 import type { Host } from '../types/host';
 import { StatusBadge } from './StatusBadge';
-import { Server, Trash2 } from 'lucide-react';
+import { Server, Trash2, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 
 interface HostCardProps {
   host: Host;
   sessionCount: number;
   onDelete: (id: string) => void;
+  onUpdate: (id: string) => Promise<void>;
 }
 
-export function HostCard({ host, sessionCount, onDelete }: HostCardProps) {
+export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardProps) {
+  const [updating, setUpdating] = useState(false);
+
+  const handleUpdate = async () => {
+    setUpdating(true);
+    try {
+      await onUpdate(host.id);
+    } catch (error) {
+      console.error('Failed to trigger update:', error);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 hover:border-gray-700 transition-colors">
       <div className="flex items-start justify-between">
@@ -23,6 +38,11 @@ export function HostCard({ host, sessionCount, onDelete }: HostCardProps) {
         <div>{host.hostname}:{host.ssh_port}</div>
         <div>{host.ssh_user}@{host.os || 'unknown'}/{host.arch || 'unknown'}</div>
         <div>{sessionCount} session{sessionCount !== 1 ? 's' : ''} / {host.max_sessions} max</div>
+        {host.update_available && (
+          <div className="text-yellow-500 text-xs">
+            Update available: v{host.latest_version}
+          </div>
+        )}
       </div>
       <div className="mt-3 flex items-center gap-2">
         {Object.entries(host.labels || {}).map(([k, v]) => (
@@ -31,7 +51,17 @@ export function HostCard({ host, sessionCount, onDelete }: HostCardProps) {
           </span>
         ))}
       </div>
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex justify-end gap-2">
+        {host.update_available && (
+          <button
+            onClick={handleUpdate}
+            disabled={updating || host.status !== 'online'}
+            className="text-gray-500 hover:text-yellow-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={updating ? 'Updating...' : 'Update agent'}
+          >
+            <Download size={14} className={updating ? 'animate-pulse' : ''} />
+          </button>
+        )}
         <button
           onClick={() => onDelete(host.id)}
           className="text-gray-500 hover:text-red-400 transition-colors"

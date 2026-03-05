@@ -415,6 +415,15 @@ func (s *Service) SendInput(sess *models.Session, host *models.Host, input strin
 	return s.sendCommand(host.ID, cmd)
 }
 
+// SendCommand sends a generic command to the agent on the specified host.
+func (s *Service) SendCommand(hostID, command string, args map[string]string) error {
+	cmd := &agentrpc.SessionCommand{
+		Command: command,
+		Args:    args,
+	}
+	return s.sendCommand(hostID, cmd)
+}
+
 func (s *Service) sendCommand(hostID string, cmd *agentrpc.SessionCommand) error {
 	cmd.CommandID = models.NewID()
 	key := pendingKey(hostID, cmd.CommandID)

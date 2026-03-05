@@ -324,3 +324,46 @@ func (s *Server) handleGetClientCert(w http.ResponseWriter, r *http.Request) {
 		"client_key":  string(keyPEM),
 	})
 }
+
+// handleUpdateAgent triggers an agent update on the specified host
+func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	hostID := chi.URLParam(r, "id")
+
+	// Get host to verify it exists
+	host, err := s.store.GetHost(hostID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "host not found")
+			return
+		}
+		writeInternalError(w, err)
+		return
+	}
+
+	// Check if host is online
+	if host.Status != models.HostStatusOnline {
+		writeError(w, http.StatusBadRequest, "host is not online")
+		return
+	}
+
+	// Check if an update is available
+	if !host.UpdateAvailable {
+		writeError(w, http.StatusBadRequest, "no update available for this host")
+		return
+	}
+
+	// Send update command to agent via agent controller
+	if s.sessionMgr == nil {
+		writeError(w, http.StatusInternalServerError, "session manager not initialized")
+		return
+	}
+
+	if err := s.sessionMgr.SendAgentCommand(hostID, "update_agent", nil); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to send update command: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "update command sent",
+	})
+}

@@ -157,6 +157,7 @@ func (s *Server) setupRoutes() {
 					r.Put("/", s.handleUpdateHost)
 					r.Delete("/", s.handleDeleteHost)
 					r.Get("/sessions", s.handleListHostSessions)
+					r.Post("/update", s.handleUpdateAgent)
 				})
 			})
 

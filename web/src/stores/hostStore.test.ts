@@ -17,6 +17,7 @@ describe('hostStore', () => {
     arch: 'x86_64',
     status: 'online',
     agent_version: '1.0.0',
+    update_available: false,
     labels: { env: 'test' },
     max_sessions: 5,
     base_repo_path: '/repos',

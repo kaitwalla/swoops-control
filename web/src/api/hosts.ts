@@ -7,4 +7,5 @@ export const hostsApi = {
   create: (data: CreateHostRequest) => api.post<Host>('/hosts', data),
   update: (id: string, data: Partial<CreateHostRequest>) => api.put<Host>(`/hosts/${id}`, data),
   del: (id: string) => api.del<void>(`/hosts/${id}`),
+  triggerUpdate: (id: string) => api.post<{ status: string }>(`/hosts/${id}/update`, {}),
 };
