@@ -51,16 +51,35 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
     try {
       // Create a new agent host
       const hostName = `agent-${Date.now()}`;
-      const response = await api.post<{id: string; name: string; auth_token: string}>('/hosts/agent', {
+      const response = await api.post<{
+        id: string;
+        name: string;
+        auth_token: string;
+        client_cert?: string;
+        client_key?: string;
+      }>('/hosts/agent', {
         name: hostName
       });
 
-      // Fetch server info with the host credentials
-      const serverInfoWithCreds = await api.get<ServerInfo>(
-        `/server-info?host_id=${response.id}&auth_token=${response.auth_token}`
-      );
+      // Build setup command with credentials
+      let setupCmd = `curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash -s --`;
 
-      setAgentSetupCommand(serverInfoWithCreds.setup_command);
+      // Fetch server info to get server address
+      const serverInfo = await api.get<ServerInfo>('/server-info');
+      setupCmd += ` --server ${serverInfo.grpc_address}`;
+      setupCmd += ` --host-id ${response.id}`;
+      setupCmd += ` --auth-token ${response.auth_token}`;
+
+      if (serverInfo.grpc_secure) {
+        setupCmd += ` --download-ca --http-url ${serverInfo.http_url}`;
+
+        // If we have client cert/key, we need to save them first
+        if (response.client_cert && response.client_key) {
+          setupCmd += ` # Note: Client certificates will be downloaded during setup`;
+        }
+      }
+
+      setAgentSetupCommand(setupCmd);
     } catch (err) {
       setError((err as Error).message);
     } finally {

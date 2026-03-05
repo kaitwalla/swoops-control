@@ -154,6 +154,7 @@ func (s *Server) setupRoutes() {
 					r.Put("/", s.handleUpdateHost)
 					r.Delete("/", s.handleDeleteHost)
 					r.Get("/sessions", s.handleListHostSessions)
+					r.Get("/client-cert", s.handleGetClientCert) // Download client cert/key for mTLS
 				})
 			})
 

@@ -43,13 +43,14 @@ type DatabaseConfig struct {
 }
 
 type GRPCConfig struct {
-	Host      string `yaml:"host"`
-	Port      int    `yaml:"port"`
-	TLSCert   string `yaml:"tls_cert"`   // Path to server TLS certificate file
-	TLSKey    string `yaml:"tls_key"`    // Path to server TLS private key file
-	ClientCA  string `yaml:"client_ca"`  // Path to client CA certificate for mTLS (optional)
-	Insecure  bool   `yaml:"insecure"`   // Allow insecure connections (dev only)
-	RequireMTLS bool `yaml:"require_mtls"` // Require client certificates (mTLS)
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	TLSCert     string `yaml:"tls_cert"`      // Path to server TLS certificate file
+	TLSKey      string `yaml:"tls_key"`       // Path to server TLS private key file
+	ClientCA    string `yaml:"client_ca"`     // Path to client CA certificate for mTLS (optional)
+	ClientCAKey string `yaml:"client_ca_key"` // Path to client CA private key for generating client certs (optional)
+	Insecure    bool   `yaml:"insecure"`      // Allow insecure connections (dev only)
+	RequireMTLS bool   `yaml:"require_mtls"`  // Require client certificates (mTLS)
 }
 
 type AuthConfig struct {

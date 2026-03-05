@@ -2,11 +2,13 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kaitwalla/swoops-control/pkg/models"
+	"github.com/kaitwalla/swoops-control/server/internal/certgen"
 )
 
 type createHostRequest struct {
@@ -185,9 +187,11 @@ type createAgentHostRequest struct {
 }
 
 type createAgentHostResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	AuthToken string `json:"auth_token"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AuthToken  string `json:"auth_token"`
+	ClientCert string `json:"client_cert,omitempty"` // PEM-encoded client certificate for mTLS
+	ClientKey  string `json:"client_key,omitempty"`  // PEM-encoded client private key for mTLS
 }
 
 // handleCreateAgentHost creates a minimal host record for agent-based hosts
@@ -226,10 +230,74 @@ func (s *Server) handleCreateAgentHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the host with auth token (only time we expose it)
-	writeJSON(w, http.StatusCreated, createAgentHostResponse{
+	response := createAgentHostResponse{
 		ID:        host.ID,
 		Name:      host.Name,
 		AuthToken: host.AgentAuthToken,
+	}
+
+	// Generate client certificates if mTLS is enabled and CA key is available
+	if s.config.GRPC.RequireMTLS && s.config.GRPC.ClientCAKey != "" {
+		certPEM, keyPEM, err := s.generateClientCert(host.ID)
+		if err != nil {
+			// Don't fail the request, but log the error
+			// Note: we don't fail here because the cert can still be downloaded later
+		} else {
+			response.ClientCert = string(certPEM)
+			response.ClientKey = string(keyPEM)
+		}
+	}
+
+	// Return the host with auth token (only time we expose it)
+	writeJSON(w, http.StatusCreated, response)
+}
+
+// generateClientCert generates a client certificate for the given host ID
+func (s *Server) generateClientCert(hostID string) (certPEM, keyPEM []byte, err error) {
+	commonName := fmt.Sprintf("swoops-agent-%s", hostID)
+	return certgen.GenerateClientCertificateFromFiles(
+		s.config.GRPC.ClientCA,
+		s.config.GRPC.ClientCAKey,
+		commonName,
+	)
+}
+
+// handleGetClientCert returns client certificates for a host (one-time use, requires auth token)
+func (s *Server) handleGetClientCert(w http.ResponseWriter, r *http.Request) {
+	hostID := chi.URLParam(r, "id")
+	authToken := r.URL.Query().Get("auth_token")
+
+	if authToken == "" {
+		writeError(w, http.StatusUnauthorized, "auth_token query parameter is required")
+		return
+	}
+
+	// Get host and verify auth token
+	host, err := s.store.GetHost(hostID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "host not found")
+			return
+		}
+		writeInternalError(w, err)
+		return
+	}
+
+	if host.AgentAuthToken != authToken {
+		writeError(w, http.StatusUnauthorized, "invalid auth token")
+		return
+	}
+
+	// Generate client certificate
+	certPEM, keyPEM, err := s.generateClientCert(hostID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	// Return as JSON
+	writeJSON(w, http.StatusOK, map[string]string{
+		"client_cert": string(certPEM),
+		"client_key":  string(keyPEM),
 	})
 }

@@ -1338,6 +1338,60 @@ if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
 
     # Set proper permissions
     sudo chmod 644 /etc/swoops/certs/server-ca.pem
+
+    # Download client certificates for mTLS if host ID and auth token are provided
+    if [ -n "$AGENT_HOST_ID" ] && [ -n "$AGENT_AUTH_TOKEN_ARG" ]; then
+        info "Downloading client certificates for mTLS..."
+
+        CLIENT_CERT_URL="$AGENT_HTTP_URL/api/v1/hosts/$AGENT_HOST_ID/client-cert?auth_token=$AGENT_AUTH_TOKEN_ARG"
+
+        # Download client cert and key as JSON
+        if command -v curl &> /dev/null; then
+            CLIENT_CERT_JSON=$(curl -fsSL "$CLIENT_CERT_URL")
+        elif command -v wget &> /dev/null; then
+            CLIENT_CERT_JSON=$(wget -qO- "$CLIENT_CERT_URL")
+        else
+            error "Neither curl nor wget found - cannot download client certificates"
+            warn "You may need to manually configure client certificates"
+            CLIENT_CERT_JSON=""
+        fi
+
+        if [ -n "$CLIENT_CERT_JSON" ]; then
+            # Extract cert and key from JSON (using grep and sed for portability)
+            # Expected format: {"client_cert":"-----BEGIN CERTIFICATE-----\n...","client_key":"-----BEGIN EC PRIVATE KEY-----\n..."}
+
+            # Extract client_cert field and decode escaped newlines
+            CLIENT_CERT=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_cert":"[^"]*"' | sed 's/"client_cert":"//;s/"$//' | sed 's/\\n/\n/g')
+            CLIENT_KEY=$(echo "$CLIENT_CERT_JSON" | grep -o '"client_key":"[^"]*"' | sed 's/"client_key":"//;s/"$//' | sed 's/\\n/\n/g')
+
+            if [ -n "$CLIENT_CERT" ] && [ -n "$CLIENT_KEY" ]; then
+                # Write to temp files first, then move with sudo
+                TEMP_CERT=$(mktemp)
+                TEMP_KEY=$(mktemp)
+
+                echo "$CLIENT_CERT" > "$TEMP_CERT"
+                echo "$CLIENT_KEY" > "$TEMP_KEY"
+
+                sudo mv "$TEMP_CERT" /etc/swoops/certs/client-cert.pem
+                sudo mv "$TEMP_KEY" /etc/swoops/certs/client-key.pem
+
+                sudo chmod 644 /etc/swoops/certs/client-cert.pem
+                sudo chmod 600 /etc/swoops/certs/client-key.pem  # Private key should be restricted
+
+                success "Downloaded client certificates for mTLS"
+                AGENT_MTLS_ENABLED=true
+            else
+                warn "Failed to parse client certificates from server response"
+                AGENT_MTLS_ENABLED=false
+            fi
+        else
+            warn "Failed to download client certificates"
+            AGENT_MTLS_ENABLED=false
+        fi
+    else
+        AGENT_MTLS_ENABLED=false
+    fi
+
     echo
 fi
 
@@ -1447,6 +1501,13 @@ EOF
         if [ "$INIT_SYSTEM" = "systemd" ]; then
             SERVICE_FILE="/etc/systemd/system/swoops-agent.service"
 
+            # Build ExecStart command based on mTLS configuration
+            if [ "$AGENT_MTLS_ENABLED" = true ]; then
+                EXEC_START="$(which swoops-agent || echo '/usr/local/bin/swoops-agent') run --server \$SWOOPS_SERVER --host-id \$SWOOPS_HOST_ID --auth-token \$SWOOPS_AUTH_TOKEN --ca-cert /etc/swoops/certs/server-ca.pem --tls-cert /etc/swoops/certs/client-cert.pem --tls-key /etc/swoops/certs/client-key.pem"
+            else
+                EXEC_START="$(which swoops-agent || echo '/usr/local/bin/swoops-agent') run --server \$SWOOPS_SERVER --host-id \$SWOOPS_HOST_ID --auth-token \$SWOOPS_AUTH_TOKEN"
+            fi
+
             sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Swoops Agent
@@ -1458,7 +1519,7 @@ User=swoops
 Group=swoops
 WorkingDirectory=/opt/swoops
 EnvironmentFile=$AGENT_CONFIG
-ExecStart=$(which swoops-agent || echo '/usr/local/bin/swoops-agent') run --server \$SWOOPS_SERVER --host-id \$SWOOPS_HOST_ID
+ExecStart=$EXEC_START
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -1480,6 +1541,33 @@ EOF
             # Source environment variables for plist
             source "$AGENT_CONFIG"
 
+            # Build program arguments array based on mTLS configuration
+            if [ "$AGENT_MTLS_ENABLED" = true ]; then
+                PLIST_ARGS="        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
+        <string>run</string>
+        <string>--server</string>
+        <string>$SWOOPS_SERVER</string>
+        <string>--host-id</string>
+        <string>$SWOOPS_HOST_ID</string>
+        <string>--auth-token</string>
+        <string>$SWOOPS_AUTH_TOKEN</string>
+        <string>--ca-cert</string>
+        <string>/etc/swoops/certs/server-ca.pem</string>
+        <string>--tls-cert</string>
+        <string>/etc/swoops/certs/client-cert.pem</string>
+        <string>--tls-key</string>
+        <string>/etc/swoops/certs/client-key.pem</string>"
+            else
+                PLIST_ARGS="        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
+        <string>run</string>
+        <string>--server</string>
+        <string>$SWOOPS_SERVER</string>
+        <string>--host-id</string>
+        <string>$SWOOPS_HOST_ID</string>
+        <string>--auth-token</string>
+        <string>$SWOOPS_AUTH_TOKEN</string>"
+            fi
+
             cat > "$PLIST_FILE" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1489,14 +1577,7 @@ EOF
     <string>com.swoops.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$(which swoops-agent || echo '/usr/local/bin/swoops-agent')</string>
-        <string>run</string>
-        <string>--server</string>
-        <string>$SWOOPS_SERVER</string>
-        <string>--host-id</string>
-        <string>$SWOOPS_HOST_ID</string>
-        <string>--auth-token</string>
-        <string>$SWOOPS_AUTH_TOKEN</string>
+$PLIST_ARGS
     </array>
     <key>RunAtLoad</key>
     <true/>
