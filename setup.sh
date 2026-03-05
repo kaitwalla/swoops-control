@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.3.1"
+SETUP_SCRIPT_VERSION="1.3.2"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -766,9 +766,17 @@ if [ "$SKIP_INTERACTIVE" = false ] && ([ "$GRPC_TLS_ENABLED" = true ] || [ "$USE
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/client-ca.pem"
         sudo cp "$STEP_CA_DIR/certs/root_ca.crt" "$CERT_DIR/server-ca.pem"
 
-        # Copy CA private key for client certificate generation
+        # Copy and decrypt CA private key for client certificate generation
         if [ -f "$STEP_CA_DIR/secrets/intermediate_ca_key" ]; then
-            sudo cp "$STEP_CA_DIR/secrets/intermediate_ca_key" "$CERT_DIR/client-ca-key.pem"
+            # The step-ca key is encrypted, we need to decrypt it
+            if [ -f "$STEP_CA_DIR/.ca-password" ]; then
+                sudo openssl ec -in "$STEP_CA_DIR/secrets/intermediate_ca_key" \
+                    -out "$CERT_DIR/client-ca-key.pem" \
+                    -passin "file:$STEP_CA_DIR/.ca-password" 2>/dev/null || \
+                    warn "Failed to decrypt CA key, client certificate generation may not work"
+            else
+                warn "CA password file not found, cannot decrypt CA key"
+            fi
         fi
 
         # Create swoops user if it doesn't exist (needed for certificate permissions)
