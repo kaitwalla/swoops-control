@@ -179,3 +179,57 @@ func (s *Server) handleListHostSessions(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, sessions)
 }
+
+type createAgentHostRequest struct {
+	Name string `json:"name"`
+}
+
+type createAgentHostResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	AuthToken string `json:"auth_token"`
+}
+
+// handleCreateAgentHost creates a minimal host record for agent-based hosts
+// This is used when setting up a new agent via the UI
+func (s *Server) handleCreateAgentHost(w http.ResponseWriter, r *http.Request) {
+	var req createAgentHostRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	now := time.Now()
+	host := &models.Host{
+		ID:           models.NewID(),
+		Name:         req.Name,
+		Hostname:     "agent-managed", // Placeholder, agent will update this
+		SSHPort:      22,
+		SSHUser:      "",      // Not needed for agent-based hosts
+		SSHKeyPath:   "",      // Not needed for agent-based hosts
+		Status:       models.HostStatusOffline,
+		Labels:       map[string]string{"type": "agent"},
+		MaxSessions:  10,
+		BaseRepoPath: "/opt/swoops/repo",
+		WorktreeRoot: "/opt/swoops/worktrees",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := s.store.CreateHost(host); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	// Return the host with auth token (only time we expose it)
+	writeJSON(w, http.StatusCreated, createAgentHostResponse{
+		ID:        host.ID,
+		Name:      host.Name,
+		AuthToken: host.AgentAuthToken,
+	})
+}

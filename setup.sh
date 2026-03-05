@@ -10,6 +10,8 @@ NON_INTERACTIVE=false
 AGENT_SERVER=""
 AGENT_DOWNLOAD_CA=false
 AGENT_HTTP_URL=""
+AGENT_HOST_ID=""
+AGENT_AUTH_TOKEN_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -26,9 +28,17 @@ while [[ $# -gt 0 ]]; do
             AGENT_HTTP_URL="$2"
             shift 2
             ;;
+        --host-id)
+            AGENT_HOST_ID="$2"
+            shift 2
+            ;;
+        --auth-token)
+            AGENT_AUTH_TOKEN_ARG="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--server HOST:PORT] [--download-ca] [--http-url URL]"
+            echo "Usage: $0 [--server HOST:PORT] [--download-ca] [--http-url URL] [--host-id ID] [--auth-token TOKEN]"
             exit 1
             ;;
     esac
@@ -136,8 +146,12 @@ if [ "$NON_INTERACTIVE" = true ]; then
     CONTROL_PLANE_HOST="${AGENT_SERVER%:*}"
     CONTROL_PLANE_PORT="${AGENT_SERVER#*:}"
 
-    # Set host ID to hostname
-    HOST_ID=$(hostname)
+    # Set host ID to provided value or hostname
+    if [ -n "$AGENT_HOST_ID" ]; then
+        HOST_ID="$AGENT_HOST_ID"
+    else
+        HOST_ID=$(hostname)
+    fi
 
     # Determine TLS settings based on flags
     if [ "$AGENT_DOWNLOAD_CA" = true ]; then
@@ -149,8 +163,12 @@ if [ "$NON_INTERACTIVE" = true ]; then
         AGENT_MTLS_ENABLED=false
     fi
 
-    # Auth token will be prompted for later if needed
-    AGENT_AUTH_TOKEN=""
+    # Use provided auth token or leave empty
+    if [ -n "$AGENT_AUTH_TOKEN_ARG" ]; then
+        AGENT_AUTH_TOKEN="$AGENT_AUTH_TOKEN_ARG"
+    else
+        AGENT_AUTH_TOKEN=""
+    fi
 
     # Jump to binary installation (skip all the interactive setup)
     SKIP_INTERACTIVE=true

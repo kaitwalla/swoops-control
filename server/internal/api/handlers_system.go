@@ -142,10 +142,17 @@ func (s *Server) handleGetServerInfo(w http.ResponseWriter, r *http.Request) {
 		setupCmd += fmt.Sprintf(" --download-ca --http-url %s", httpURL)
 	}
 
+	// If host_id and auth_token are provided as query params, include them in the setup command
+	hostID := r.URL.Query().Get("host_id")
+	authToken := r.URL.Query().Get("auth_token")
+	if hostID != "" && authToken != "" {
+		setupCmd += fmt.Sprintf(" --host-id %s --auth-token %s", hostID, authToken)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"grpc_address": grpcAddr,
-		"grpc_secure":  !s.config.GRPC.Insecure,
-		"http_url":     httpURL,
+		"grpc_address":  grpcAddr,
+		"grpc_secure":   !s.config.GRPC.Insecure,
+		"http_url":      httpURL,
 		"setup_command": setupCmd,
 	})
 }

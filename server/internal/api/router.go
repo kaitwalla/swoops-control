@@ -148,6 +148,7 @@ func (s *Server) setupRoutes() {
 			r.Route("/hosts", func(r chi.Router) {
 				r.Get("/", s.handleListHosts)
 				r.Post("/", s.handleCreateHost)
+				r.Post("/agent", s.handleCreateAgentHost)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", s.handleGetHost)
 					r.Put("/", s.handleUpdateHost)
