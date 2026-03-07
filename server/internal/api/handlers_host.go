@@ -162,6 +162,21 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	// Delete all sessions for this host first to avoid FK constraint violation
+	sessions, err := s.store.ListSessions(id, "")
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	for _, sess := range sessions {
+		if err := s.store.DeleteSession(sess.ID); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+
 	if err := s.store.DeleteHost(id); err != nil {
 		if writeStoreError(w, err, "host not found") {
 			return

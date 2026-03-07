@@ -62,6 +62,8 @@ func (s *Store) migrate() error {
 		"migrations/003_mcp_bridge.sql",
 		"migrations/004_add_users.sql",
 		"migrations/005_add_cert_downloaded.sql",
+		"migrations/006_add_session_type.sql",
+		"migrations/007_add_host_update_info.sql",
 	}
 
 	for _, migration := range migrations {
@@ -193,19 +195,21 @@ func (s *Store) DeleteHost(id string) error {
 	return checkRowsAffected(res)
 }
 
-func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch string, at time.Time) error {
+func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch, hostname string, at time.Time) error {
 	now := time.Now()
 	res, err := s.db.Exec(`
 		UPDATE hosts
 		SET status=?, agent_version=CASE WHEN ? <> '' THEN ? ELSE agent_version END,
 		    os=CASE WHEN ? <> '' THEN ? ELSE os END,
 		    arch=CASE WHEN ? <> '' THEN ? ELSE arch END,
+		    hostname=CASE WHEN ? <> '' THEN ? ELSE hostname END,
 		    last_heartbeat=?, updated_at=?
 		WHERE id=?`,
 		models.HostStatusOnline,
 		agentVersion, agentVersion,
 		osName, osName,
 		arch, arch,
+		hostname, hostname,
 		at, now, id,
 	)
 	if err != nil {

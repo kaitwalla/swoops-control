@@ -167,7 +167,7 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 
 	// Update host heartbeat
 	now := s.now()
-	if err := s.store.UpsertHostHeartbeat(hello.HostID, hello.AgentVersion, hello.OS, hello.Arch, now); err != nil {
+	if err := s.store.UpsertHostHeartbeat(hello.HostID, hello.AgentVersion, hello.OS, hello.Arch, hello.HostName, now); err != nil {
 		s.logger.Error("failed to update hello heartbeat",
 			"host_id", hello.HostID,
 			"error", err)
@@ -176,7 +176,7 @@ func (s *Service) Connect(stream agentrpc.AgentService_ConnectServer) error {
 
 	s.logger.Info("agent connected",
 		"host_id", hello.HostID,
-		"host_name", host.Name,
+		"host_name", hello.HostName,
 		"agent_version", hello.AgentVersion,
 		"os", hello.OS,
 		"arch", hello.Arch)
