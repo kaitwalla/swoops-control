@@ -22,6 +22,7 @@ export interface Host {
   arch: string;
   status: HostStatus;
   agent_version: string;
+  agent_user?: string;
   update_available: boolean;
   latest_version?: string;
   update_url?: string;

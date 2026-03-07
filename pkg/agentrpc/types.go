@@ -14,6 +14,7 @@ type AgentHello struct {
 	OS           string `json:"os,omitempty"`
 	Arch         string `json:"arch,omitempty"`
 	AuthToken    string `json:"auth_token,omitempty"`
+	AgentUser    string `json:"agent_user,omitempty"`
 }
 
 type Heartbeat struct {

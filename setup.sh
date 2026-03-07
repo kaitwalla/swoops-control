@@ -3,7 +3,17 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.7.2"
+#
+# Agent User Configuration:
+#   The agent service can run as any user with:
+#   - Access to git repositories (for worktree creation)
+#   - Ability to create tmux sessions and run interactive shells
+#   - Read/write permissions to /opt/swoops
+#
+#   Default: Current user ($(whoami))
+#   Production: Consider using your main user account or a dedicated user with proper shell access
+#
+SETUP_SCRIPT_VERSION="1.7.4"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -303,6 +313,12 @@ if [ "$SKIP_INTERACTIVE" = false ] && command -v swoopsd &> /dev/null; then
     FORCE_DOWNLOAD_BINARIES=true
 fi
 
+# Set default agent user for non-interactive mode
+if [ "$SKIP_INTERACTIVE" = true ] && [ "$INSTALL_AGENT" = true ]; then
+    AGENT_USER=$(whoami)
+    AGENT_GROUP="$AGENT_USER"
+fi
+
 # Check if swoops-agent is already installed (skip in non-interactive mode)
 if [ "$SKIP_INTERACTIVE" = false ] && command -v swoops-agent &> /dev/null; then
     AGENT_PATH=$(which swoops-agent)
@@ -559,6 +575,16 @@ if [ "$SKIP_INTERACTIVE" = false ] && [ "$INSTALL_AGENT" = true ]; then
     fi
 
     prompt HOST_ID "Host ID (unique identifier for this machine)" "$(hostname)"
+
+    # Agent user configuration
+    echo
+    echo "The agent needs to run as a user with:"
+    echo "  - Access to git repositories"
+    echo "  - Ability to create worktrees and run shells"
+    echo "  - Read/write access to /opt/swoops"
+    echo
+    prompt AGENT_USER "User to run agent as" "$(whoami)"
+    AGENT_GROUP="$AGENT_USER"
 
     if [ "$INSTALL_SERVER" != true ]; then
         # Need to get auth token from user
@@ -893,7 +919,7 @@ if [ "$SKIP_INTERACTIVE" = false ] && ([ "$GRPC_TLS_ENABLED" = true ] || [ "$USE
 
         # Create swoops user if it doesn't exist (needed for certificate permissions)
         if ! id swoops &>/dev/null; then
-            sudo useradd -r -s /bin/false swoops || true
+            sudo useradd -r -s /bin/bash -m swoops || true
         fi
 
         # Set proper permissions - readable by swoops user
@@ -1473,6 +1499,82 @@ else
     echo
 fi
 
+# Step 8b: Install tmux if needed (required for agent sessions)
+if [ "$INSTALL_AGENT" = true ]; then
+    echo -e "${GREEN}Step 8b: Check Dependencies${NC}"
+
+    if ! command -v tmux &> /dev/null; then
+        warn "tmux is not installed. tmux is required for interactive shell sessions."
+
+        if [ "$NON_INTERACTIVE" = true ] || confirm "Install tmux now?" "y"; then
+            info "Installing tmux..."
+
+            if [ "$OS" = "linux" ]; then
+                if command -v apt-get &> /dev/null; then
+                    # Debian/Ubuntu
+                    if sudo apt-get update && sudo apt-get install -y tmux; then
+                        success "tmux installed successfully"
+                    else
+                        error "Failed to install tmux via apt-get"
+                        warn "You'll need to install tmux manually for interactive sessions to work"
+                    fi
+                elif command -v yum &> /dev/null; then
+                    # RHEL/CentOS
+                    if sudo yum install -y tmux; then
+                        success "tmux installed successfully"
+                    else
+                        error "Failed to install tmux via yum"
+                        warn "You'll need to install tmux manually for interactive sessions to work"
+                    fi
+                elif command -v dnf &> /dev/null; then
+                    # Fedora
+                    if sudo dnf install -y tmux; then
+                        success "tmux installed successfully"
+                    else
+                        error "Failed to install tmux via dnf"
+                        warn "You'll need to install tmux manually for interactive sessions to work"
+                    fi
+                elif command -v apk &> /dev/null; then
+                    # Alpine
+                    if sudo apk add --no-cache tmux; then
+                        success "tmux installed successfully"
+                    else
+                        error "Failed to install tmux via apk"
+                        warn "You'll need to install tmux manually for interactive sessions to work"
+                    fi
+                else
+                    error "Unsupported package manager. Please install tmux manually:"
+                    echo "  Debian/Ubuntu: sudo apt-get install tmux"
+                    echo "  RHEL/CentOS:   sudo yum install tmux"
+                    echo "  Fedora:        sudo dnf install tmux"
+                    echo "  Alpine:        sudo apk add tmux"
+                fi
+            elif [ "$OS" = "macos" ]; then
+                if command -v brew &> /dev/null; then
+                    if brew install tmux; then
+                        success "tmux installed successfully"
+                    else
+                        error "Failed to install tmux via Homebrew"
+                        warn "You'll need to install tmux manually for interactive sessions to work"
+                    fi
+                else
+                    error "Homebrew not found. Please install tmux manually:"
+                    echo "  brew install tmux"
+                    echo "  or visit: https://github.com/tmux/tmux/wiki/Installing"
+                fi
+            else
+                warn "Unknown OS. Please install tmux manually for interactive sessions to work"
+            fi
+        else
+            warn "Skipping tmux installation. Interactive shell sessions will not work without it."
+        fi
+    else
+        success "tmux is already installed: $(tmux -V)"
+    fi
+
+    echo
+fi
+
 # Download CA certificate if requested in non-interactive mode
 if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
     info "Downloading CA certificate from $AGENT_HTTP_URL..."
@@ -1610,9 +1712,10 @@ EOF
 
             success "Systemd service created: $SERVICE_FILE"
 
-            # Create user
+            # Create user (with /bin/bash for server - it just runs swoopsd binary)
             if ! id swoops &>/dev/null; then
-                sudo useradd -r -s /bin/false swoops || true
+                sudo useradd -r -s /bin/bash -m swoops || true
+                info "Created 'swoops' system user"
             fi
 
             # Create directories
@@ -1697,8 +1800,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=swoops
-Group=swoops
+User=$AGENT_USER
+Group=$AGENT_GROUP
 WorkingDirectory=/opt/swoops
 EnvironmentFile=$AGENT_CONFIG
 ExecStart=$EXEC_START
@@ -1712,6 +1815,18 @@ WantedBy=multi-user.target
 EOF
 
             success "Systemd service created: $SERVICE_FILE"
+            info "Agent will run as user: $AGENT_USER"
+
+            # Ensure the agent user exists
+            if ! id "$AGENT_USER" &>/dev/null; then
+                error "User $AGENT_USER does not exist. Please create it first or choose a different user."
+                exit 1
+            fi
+
+            # Create directories and set permissions for agent user
+            sudo mkdir -p /opt/swoops
+            sudo chown -R "$AGENT_USER:$AGENT_GROUP" /opt/swoops
+            sudo chmod 755 /opt/swoops
 
             sudo systemctl daemon-reload
             info "To start: sudo systemctl start swoops-agent"
@@ -1853,6 +1968,7 @@ if [ "$INSTALL_AGENT" = true ]; then
     echo "  Config file: $AGENT_CONFIG"
     echo "  Control Plane: $CONTROL_PLANE_HOST:$CONTROL_PLANE_PORT"
     echo "  Host ID: $HOST_ID"
+    echo "  Running as user: $AGENT_USER"
     if [ "$AGENT_TLS_ENABLED" = true ]; then
         echo "  TLS: Yes (mTLS: $AGENT_MTLS_ENABLED)"
     fi

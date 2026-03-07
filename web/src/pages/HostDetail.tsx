@@ -47,6 +47,9 @@ export function HostDetail() {
           <h2 className="text-sm font-semibold text-gray-400 uppercase">System</h2>
           <div className="text-sm"><span className="text-gray-500">OS/Arch:</span> {host.os || 'unknown'}/{host.arch || 'unknown'}</div>
           <div className="text-sm"><span className="text-gray-500">Agent:</span> {host.agent_version || 'not installed'}</div>
+          {host.agent_user && (
+            <div className="text-sm"><span className="text-gray-500">Agent User:</span> {host.agent_user}</div>
+          )}
           <div className="text-sm"><span className="text-gray-500">Max Sessions:</span> {host.max_sessions}</div>
           <div className="text-sm"><span className="text-gray-500">Base Repo:</span> <span className="font-mono text-xs">{host.base_repo_path}</span></div>
           <div className="text-sm"><span className="text-gray-500">Worktree Root:</span> <span className="font-mono text-xs">{host.worktree_root}</span></div>

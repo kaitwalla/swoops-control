@@ -22,6 +22,7 @@ type Host struct {
 	Arch                 string            `json:"arch" db:"arch"`
 	Status               HostStatus        `json:"status" db:"status"`
 	AgentVersion         string            `json:"agent_version" db:"agent_version"`
+	AgentUser            string            `json:"agent_user,omitempty" db:"agent_user"` // User the agent is running as
 	AgentAuthToken       string            `json:"-" db:"agent_auth_token"`        // Exclude from JSON for security
 	CertDownloaded       bool              `json:"-" db:"cert_downloaded"`         // Track if client cert has been downloaded
 	UpdateAvailable      bool              `json:"update_available" db:"update_available"`

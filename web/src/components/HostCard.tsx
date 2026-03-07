@@ -57,6 +57,9 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate, onCheckForUpd
       <div className="mt-3 space-y-1 text-sm text-gray-400">
         <div>{host.hostname}:{host.ssh_port}</div>
         <div>{host.ssh_user}@{host.os || 'unknown'}/{host.arch || 'unknown'}</div>
+        {host.agent_user && (
+          <div className="text-xs">Agent running as: {host.agent_user}</div>
+        )}
         <div>{sessionCount} session{sessionCount !== 1 ? 's' : ''} / {host.max_sessions} max</div>
         {host.update_available && host.latest_version && (
           <div className="text-yellow-500 text-xs">

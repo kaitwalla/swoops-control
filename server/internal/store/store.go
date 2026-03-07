@@ -195,7 +195,7 @@ func (s *Store) DeleteHost(id string) error {
 	return checkRowsAffected(res)
 }
 
-func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch, hostname string, at time.Time) error {
+func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch, hostname, agentUser string, at time.Time) error {
 	now := time.Now()
 	res, err := s.db.Exec(`
 		UPDATE hosts
@@ -203,6 +203,7 @@ func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch, hostname str
 		    os=CASE WHEN ? <> '' THEN ? ELSE os END,
 		    arch=CASE WHEN ? <> '' THEN ? ELSE arch END,
 		    hostname=CASE WHEN ? <> '' THEN ? ELSE hostname END,
+		    agent_user=CASE WHEN ? <> '' THEN ? ELSE agent_user END,
 		    last_heartbeat=?, updated_at=?
 		WHERE id=?`,
 		models.HostStatusOnline,
@@ -210,6 +211,7 @@ func (s *Store) UpsertHostHeartbeat(id, agentVersion, osName, arch, hostname str
 		osName, osName,
 		arch, arch,
 		hostname, hostname,
+		agentUser, agentUser,
 		at, now, id,
 	)
 	if err != nil {

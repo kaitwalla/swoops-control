@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -296,6 +297,17 @@ func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName 
 
 	rt := newAgentRuntime(outbound)
 
+	// Get current user
+	currentUser := os.Getenv("USER")
+	if currentUser == "" {
+		currentUser = os.Getenv("USERNAME") // Windows fallback
+	}
+	if currentUser == "" {
+		if u, err := user.Current(); err == nil {
+			currentUser = u.Username
+		}
+	}
+
 	select {
 	case outbound <- &agentrpc.AgentEnvelope{
 		Hello: &agentrpc.AgentHello{
@@ -305,6 +317,7 @@ func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName 
 			AgentVersion: version.Get().Version,
 			OS:           runtime.GOOS,
 			Arch:         runtime.GOARCH,
+			AgentUser:    currentUser,
 		},
 	}:
 	case err := <-sendErr:
