@@ -372,6 +372,20 @@ func (s *Service) LaunchSession(sess *models.Session, host *models.Host) error {
 		"model_override": sess.ModelOverride,
 	}
 
+	// For shell sessions, set working directory
+	if sess.Type == models.SessionTypeShell {
+		// Use WorktreePath if set, otherwise default to base repo path or home directory
+		workDir := sess.WorktreePath
+		if workDir == "" {
+			if host.BaseRepoPath != "" {
+				workDir = host.BaseRepoPath
+			} else {
+				workDir = "~"
+			}
+		}
+		args["work_dir"] = workDir
+	}
+
 	// Add MCP config parameters if config is available
 	if s.config != nil {
 		var serverAddr string

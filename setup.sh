@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.7.1"
+SETUP_SCRIPT_VERSION="1.7.2"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false

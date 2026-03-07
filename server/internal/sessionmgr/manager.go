@@ -93,7 +93,12 @@ func (m *Manager) LaunchSession(sessionID, hostID string) error {
 		if err := m.launchViaAgent(sess, host); err == nil {
 			return nil
 		} else {
-			log.Printf("session %s agent launch failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
+			// Only fall back to SSH if SSH credentials are configured
+			if host.SSHKeyPath != "" {
+				log.Printf("session %s agent launch failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
+				return m.launchViaSSH(sess, host)
+			}
+			return fmt.Errorf("agent launch failed and no SSH credentials configured: %w", err)
 		}
 	}
 	return m.launchViaSSH(sess, host)
@@ -105,6 +110,10 @@ func (m *Manager) StopSession(sess *models.Session, host *models.Host) error {
 		if err := m.stopViaAgent(sess, host); err == nil {
 			return nil
 		} else {
+			// Only fall back to SSH if SSH credentials are configured
+			if host.SSHKeyPath == "" {
+				return fmt.Errorf("agent stop failed and no SSH credentials configured: %w", err)
+			}
 			log.Printf("session %s agent stop failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
 		}
 	}
@@ -159,6 +168,10 @@ func (m *Manager) SendInput(sess *models.Session, host *models.Host, input strin
 		if err := m.sendInputViaAgent(sess, host, input); err == nil {
 			return nil
 		} else {
+			// Only fall back to SSH if SSH credentials are configured
+			if host.SSHKeyPath == "" {
+				return fmt.Errorf("agent input failed and no SSH credentials configured: %w", err)
+			}
 			log.Printf("session %s agent input failed on host %s, falling back to SSH: %v", sess.ID, host.ID, err)
 		}
 	}
