@@ -3,7 +3,7 @@ set -e
 
 # Swoops Interactive Setup Script
 # This script guides you through configuring Swoops for production deployment
-SETUP_SCRIPT_VERSION="1.7.0"
+SETUP_SCRIPT_VERSION="1.7.1"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false
@@ -1481,7 +1481,7 @@ if [ "$NON_INTERACTIVE" = true ] && [ "$AGENT_DOWNLOAD_CA" = true ]; then
     sudo mkdir -p /etc/swoops/certs
 
     # Download the CA certificate
-    CA_URL="$AGENT_HTTP_URL/api/ca-cert"
+    CA_URL="$AGENT_HTTP_URL/api/v1/ca-cert"
     if command -v curl &> /dev/null; then
         if ! sudo curl -fsSL "$CA_URL" -o /etc/swoops/certs/server-ca.pem; then
             error "Failed to download CA certificate from $CA_URL"
