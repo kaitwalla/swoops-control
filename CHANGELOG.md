@@ -5,6 +5,50 @@ All notable changes to Swoops will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-03-07
+
+### Added
+- **Agent Hostname Tracking**: Server now stores and displays agent's actual hostname (e.g., `swoops.local`)
+  - Helps identify which physical machine each agent is running on
+  - Hostname automatically updated on agent connection
+
+### Fixed
+- **Host Deletion**: Fixed 500 Internal Server Error when deleting hosts with active sessions
+  - Now properly deletes all associated sessions before removing host
+  - Prevents foreign key constraint violations
+
+## [1.6.0] - 2026-03-07
+
+### Added
+- **Manual Update Check for Agents**: UI button to force immediate update check
+  - Refresh button (🔄) on each online host card
+  - No need to wait 24 hours for automatic checks
+  - API endpoint: `POST /api/v1/hosts/{id}/check-updates`
+
+- **Auto-Restart After Agent Update**: Agent automatically restarts service after successful update
+  - Supports systemd (Linux) and launchd (macOS)
+  - Updates take effect immediately without manual intervention
+  - No more manual service restarts required
+
+### Changed
+- **Setup Script**: Improved agent update detection
+  - Detects existing agent installations early in setup flow
+  - Prompts for update before component selection
+  - Auto-stops/restarts service during binary replacement
+
+## [1.5.0] - 2026-03-07
+
+### Added
+- **Shell Session Support via Agent**: Interactive shell sessions now work through agent connection
+  - No SSH keys required for agent-connected hosts
+  - Agent handles shell sessions over authenticated gRPC connection
+  - Supports custom working directory for shell sessions
+
+### Changed
+- **Session Launch**: Added `session_type` parameter to distinguish shell vs agent sessions
+  - Server passes session type to agent during launch
+  - Agent creates appropriate environment based on type
+
 ## [0.3.0] - 2026-02-28
 
 ### Added - Phase 6: Production Hardening

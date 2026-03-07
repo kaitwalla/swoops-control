@@ -35,6 +35,8 @@ Internet                     Production Deployment
 - **Web UI**: React-based dashboard for managing hosts and sessions
 - **Control Plane**: Go server with REST API, WebSocket streaming, and gRPC
 - **Agent**: Daemon running on each host for session management
+  - Auto-updates with one-click from UI
+  - No SSH keys required for shell sessions
 - **Reverse Proxy**: Caddy or nginx with automatic HTTPS (recommended for production)
 - **MCP Bridge**: AI agents can coordinate via MCP tools
 

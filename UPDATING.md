@@ -2,7 +2,31 @@
 
 This guide explains how to update your Swoops installation to the latest version.
 
-## Method 1: In-Place Update (Recommended)
+## Updating Agents (v1.6.0+)
+
+**From the Web UI (Easiest)**:
+1. Click the refresh button (🔄) on any online host to check for updates
+2. When update is available, click the download button (⬇️)
+3. Agent automatically downloads, installs, and restarts itself
+4. Check agent version in UI to confirm update
+
+**From SSH/Terminal**:
+```bash
+# Run the setup script on the agent machine
+curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash
+# Select "Yes" when prompted to update
+```
+
+The setup script will:
+1. Detect existing installation
+2. Download latest version
+3. Stop the service
+4. Replace the binary
+5. Restart the service
+
+## Updating the Server
+
+### Method 1: In-Place Update (Recommended)
 
 Swoops includes a built-in update mechanism that downloads and installs the latest release from GitHub.
 
