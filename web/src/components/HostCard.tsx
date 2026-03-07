@@ -1,6 +1,6 @@
 import type { Host } from '../types/host';
 import { StatusBadge } from './StatusBadge';
-import { Server, Trash2, Download } from 'lucide-react';
+import { Server, Trash2, Download, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
 
@@ -9,10 +9,12 @@ interface HostCardProps {
   sessionCount: number;
   onDelete: (id: string) => void;
   onUpdate: (id: string) => Promise<void>;
+  onCheckForUpdates: (id: string) => Promise<void>;
 }
 
-export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardProps) {
+export function HostCard({ host, sessionCount, onDelete, onUpdate, onCheckForUpdates }: HostCardProps) {
   const [updating, setUpdating] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   const handleUpdate = async () => {
@@ -26,6 +28,20 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardPro
       console.error('Failed to trigger update:', error);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    setChecking(true);
+    setUpdateError(null);
+    try {
+      await onCheckForUpdates(host.id);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to check for updates';
+      setUpdateError(errorMessage);
+      console.error('Failed to check for updates:', error);
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -61,6 +77,15 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate }: HostCardPro
         ))}
       </div>
       <div className="mt-3 flex justify-end gap-2">
+        <button
+          onClick={handleCheckForUpdates}
+          disabled={checking || host.status !== 'online'}
+          className="text-gray-500 hover:text-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={checking ? 'Checking for updates...' : 'Check for updates'}
+          aria-label={checking ? 'Checking for updates' : 'Check for updates'}
+        >
+          <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+        </button>
         {host.update_available && (
           <button
             onClick={handleUpdate}

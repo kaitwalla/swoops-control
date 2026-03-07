@@ -55,8 +55,9 @@ type CommandResult struct {
 }
 
 const (
-	CommandLaunch       = "launch_session"
-	CommandStop         = "stop_session"
-	CommandInput        = "send_input"
-	CommandUpdateAgent  = "update_agent"
+	CommandLaunch           = "launch_session"
+	CommandStop             = "stop_session"
+	CommandInput            = "send_input"
+	CommandUpdateAgent      = "update_agent"
+	CommandCheckForUpdates  = "check_for_updates"
 )

@@ -6,7 +6,7 @@ import { CreateHostDialog } from '../components/CreateHostDialog';
 import { Plus } from 'lucide-react';
 
 export function HostsPage() {
-  const { hosts, loading, error, fetchHosts, createHost, deleteHost, triggerUpdate } = useHostStore();
+  const { hosts, loading, error, fetchHosts, createHost, deleteHost, triggerUpdate, checkForUpdates } = useHostStore();
   const { sessions, fetchSessions } = useSessionStore();
   const [showCreate, setShowCreate] = useState(false);
 
@@ -56,6 +56,7 @@ export function HostsPage() {
               sessionCount={sessionCountByHost[host.id] || 0}
               onDelete={deleteHost}
               onUpdate={triggerUpdate}
+              onCheckForUpdates={checkForUpdates}
             />
           ))}
         </div>

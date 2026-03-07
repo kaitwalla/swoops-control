@@ -10,6 +10,7 @@ interface HostStore {
   createHost: (data: CreateHostRequest) => Promise<Host>;
   deleteHost: (id: string) => Promise<void>;
   triggerUpdate: (id: string) => Promise<void>;
+  checkForUpdates: (id: string) => Promise<void>;
 }
 
 export const useHostStore = create<HostStore>((set, get) => ({
@@ -42,5 +43,13 @@ export const useHostStore = create<HostStore>((set, get) => ({
     await hostsApi.triggerUpdate(id);
     // Refresh hosts to get updated state
     await get().fetchHosts();
+  },
+
+  checkForUpdates: async (id: string) => {
+    await hostsApi.checkForUpdates(id);
+    // Wait a bit for the agent to respond, then refresh
+    setTimeout(async () => {
+      await get().fetchHosts();
+    }, 2000);
   },
 }));

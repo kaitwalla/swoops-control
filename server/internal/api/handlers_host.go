@@ -10,6 +10,7 @@ import (
 	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
 	"github.com/kaitwalla/swoops-control/pkg/models"
 	"github.com/kaitwalla/swoops-control/server/internal/certgen"
+	"github.com/kaitwalla/swoops-control/server/internal/store"
 )
 
 type createHostRequest struct {
@@ -366,5 +367,41 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "update command sent",
+	})
+}
+
+func (s *Server) handleCheckForUpdates(w http.ResponseWriter, r *http.Request) {
+	hostID := chi.URLParam(r, "id")
+
+	// Verify host exists
+	host, err := s.store.GetHost(hostID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "host not found")
+			return
+		}
+		writeInternalError(w, err)
+		return
+	}
+
+	// Check if host is online
+	if host.Status != models.HostStatusOnline {
+		writeError(w, http.StatusBadRequest, "host is not online")
+		return
+	}
+
+	// Send check for updates command to agent
+	if s.sessionMgr == nil {
+		writeError(w, http.StatusInternalServerError, "session manager not initialized")
+		return
+	}
+
+	if err := s.sessionMgr.SendAgentCommand(hostID, agentrpc.CommandCheckForUpdates, nil); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to send check for updates command: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "check for updates command sent",
 	})
 }

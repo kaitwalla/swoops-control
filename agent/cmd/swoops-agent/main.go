@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -446,6 +447,8 @@ func (a *agentRuntime) handleControlMessage(msg *agentrpc.ControlEnvelope) error
 		err = a.handleInput(cmd)
 	case agentrpc.CommandUpdateAgent:
 		err = a.handleUpdateAgent(cmd)
+	case agentrpc.CommandCheckForUpdates:
+		err = a.handleCheckForUpdates(cmd)
 	default:
 		return a.sendCommandResult(cmd, true, "")
 	}
@@ -678,10 +681,56 @@ func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
 	// Remove backup
 	os.Remove(backupPath)
 
-	log.Printf("✅ Agent updated successfully to v%s - restart required", updateInfo.LatestVersion)
-	log.Printf("   The agent will need to be restarted for the update to take effect")
+	log.Printf("✅ Agent updated successfully to v%s - restarting...", updateInfo.LatestVersion)
+
+	// Restart the agent service
+	go func() {
+		time.Sleep(2 * time.Second) // Give time for response to be sent
+		if err := restartAgentService(); err != nil {
+			log.Printf("Failed to restart agent service: %v", err)
+			log.Printf("Please manually restart the agent service to complete the update")
+		}
+	}()
 
 	return nil
+}
+
+func (a *agentRuntime) handleCheckForUpdates(cmd *agentrpc.SessionCommand) error {
+	log.Printf("Received check for updates command")
+
+	checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	updateInfo, err := version.CheckForUpdates(checkCtx, "kaitwalla", "swoops-control")
+	if err != nil {
+		return fmt.Errorf("check for updates: %w", err)
+	}
+
+	// Update the runtime's update info
+	a.setUpdateInfo(updateInfo)
+
+	if updateInfo.UpdateAvailable {
+		log.Printf("Update available: v%s → v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
+		return nil
+	}
+
+	log.Printf("Agent is up to date (v%s)", updateInfo.CurrentVersion)
+	return nil
+}
+
+func restartAgentService() error {
+	// Determine the init system and restart accordingly
+	if _, err := os.Stat("/run/systemd/system"); err == nil {
+		// systemd
+		cmd := exec.Command("systemctl", "restart", "swoops-agent")
+		return cmd.Run()
+	} else if runtime.GOOS == "darwin" {
+		// launchd on macOS
+		cmd := exec.Command("launchctl", "kickstart", "-k", "system/com.swoops.agent")
+		return cmd.Run()
+	}
+
+	return fmt.Errorf("unable to detect init system for restart")
 }
 
 func (a *agentRuntime) pollOutput(sr *sessionRuntime) {
