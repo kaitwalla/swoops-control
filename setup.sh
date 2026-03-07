@@ -1201,7 +1201,18 @@ else
         if ! command -v swoops-agent &> /dev/null; then
             NEED_AGENT_BINARY=true
         else
-            info "swoops-agent already installed at $(which swoops-agent)"
+            AGENT_PATH=$(which swoops-agent)
+            AGENT_VERSION=$(swoops-agent version 2>/dev/null | head -1 || echo "unknown")
+
+            echo -e "${YELLOW}⚠${NC} swoops-agent is already installed at: $AGENT_PATH"
+            echo "  Current version: $AGENT_VERSION"
+            echo
+
+            if confirm "Would you like to update swoops-agent to the latest version?" "y"; then
+                NEED_AGENT_BINARY=true
+            else
+                info "Skipping agent update"
+            fi
         fi
     fi
 fi
@@ -1315,8 +1326,33 @@ if [ "$NEED_SERVER_BINARY" = true ] || [ "$NEED_AGENT_BINARY" = true ]; then
         fi
 
         chmod +x "$TEMP_BINARY"
+
+        # Stop the service before updating if it's running
+        if [ "$OS" = "linux" ] && systemctl is-active --quiet swoops-agent 2>/dev/null; then
+            info "Stopping swoops-agent service..."
+            sudo systemctl stop swoops-agent
+            AGENT_WAS_RUNNING=true
+        elif [ "$OS" = "macos" ] && launchctl list | grep -q com.swoops.agent 2>/dev/null; then
+            info "Stopping swoops-agent service..."
+            launchctl unload ~/Library/LaunchAgents/com.swoops.agent.plist 2>/dev/null || true
+            AGENT_WAS_RUNNING=true
+        fi
+
         sudo mv "$TEMP_BINARY" /usr/local/bin/swoops-agent
         success "Installed swoops-agent to /usr/local/bin/swoops-agent"
+
+        # Restart the service if it was running
+        if [ "$AGENT_WAS_RUNNING" = true ]; then
+            if [ "$OS" = "linux" ]; then
+                info "Restarting swoops-agent service..."
+                sudo systemctl start swoops-agent
+                success "Agent service restarted"
+            elif [ "$OS" = "macos" ]; then
+                info "Restarting swoops-agent service..."
+                launchctl load ~/Library/LaunchAgents/com.swoops.agent.plist
+                success "Agent service restarted"
+            fi
+        fi
     fi
 
     echo
