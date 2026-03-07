@@ -10,62 +10,102 @@ permissions:
 
 jobs:
   release:
-    name: Create Release
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
 
-      - name: Get version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Build web frontend
+      - name: Build binaries
         run: |
+          # Build web frontend
           cd web
           npm install
           npm run build
           cd ..
+
+          # Copy frontend to server
           rm -rf server/internal/frontend/dist
           cp -r web/dist server/internal/frontend/dist
 
-      - name: Build binaries
-        run: |
-          # Build server binaries
-          GOOS=linux GOARCH=amd64 go build -o swoopsd-linux-amd64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./server/cmd/swoopsd
-          GOOS=linux GOARCH=arm64 go build -o swoopsd-linux-arm64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./server/cmd/swoopsd
-          GOOS=darwin GOARCH=amd64 go build -o swoopsd-darwin-amd64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./server/cmd/swoopsd
-          GOOS=darwin GOARCH=arm64 go build -o swoopsd-darwin-arm64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./server/cmd/swoopsd
+          # Build server for multiple platforms
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/swoopsd-linux-amd64 ./server/cmd/swoopsd
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bin/swoopsd-linux-arm64 ./server/cmd/swoopsd
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/swoopsd-darwin-amd64 ./server/cmd/swoopsd
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/swoopsd-darwin-arm64 ./server/cmd/swoopsd
 
-          # Build agent binaries
-          GOOS=linux GOARCH=amd64 go build -o swoops-agent-linux-amd64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./agent/cmd/swoops-agent
-          GOOS=linux GOARCH=arm64 go build -o swoops-agent-linux-arm64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./agent/cmd/swoops-agent
-          GOOS=darwin GOARCH=amd64 go build -o swoops-agent-darwin-amd64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./agent/cmd/swoops-agent
-          GOOS=darwin GOARCH=arm64 go build -o swoops-agent-darwin-arm64 -ldflags "-X github.com/kaitwalla/swoops-control/pkg/version.Version=${{ steps.version.outputs.VERSION }} -X github.com/kaitwalla/swoops-control/pkg/version.GitCommit=${GITHUB_SHA}" ./agent/cmd/swoops-agent
+          # Build agent for multiple platforms
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/swoops-agent-linux-amd64 ./agent/cmd/swoops-agent
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bin/swoops-agent-linux-arm64 ./agent/cmd/swoops-agent
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/swoops-agent-darwin-amd64 ./agent/cmd/swoops-agent
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/swoops-agent-darwin-arm64 ./agent/cmd/swoops-agent
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
+          fi
+
+          # Create release notes
+          cat > release_notes.md <<RELEASE_EOF
+          ## Changes
+
+          $COMMITS
+
+          ## Installation
+
+          Download and run the setup script:
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | bash
+          \`\`\`
+
+          Or for non-interactive agent setup:
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/kaitwalla/swoops-control/main/setup.sh | \\
+            bash -s -- --non-interactive --agent \\
+            --server "control.example.com:9090" \\
+            --host-id "my-agent-1" \\
+            --auth-token "your-token-here"
+          \`\`\`
+
+          ## Binaries
+
+          Download the appropriate binary for your platform and architecture.
+          RELEASE_EOF
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          body_path: release_notes.md
           files: |
-            swoopsd-linux-amd64
-            swoopsd-linux-arm64
-            swoopsd-darwin-amd64
-            swoopsd-darwin-arm64
-            swoops-agent-linux-amd64
-            swoops-agent-linux-arm64
-            swoops-agent-darwin-amd64
-            swoops-agent-darwin-arm64
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            bin/swoopsd-linux-amd64
+            bin/swoopsd-linux-arm64
+            bin/swoopsd-darwin-amd64
+            bin/swoopsd-darwin-arm64
+            bin/swoops-agent-linux-amd64
+            bin/swoops-agent-linux-arm64
+            bin/swoops-agent-darwin-amd64
+            bin/swoops-agent-darwin-arm64
+            setup.sh
+          draft: false
+          prerelease: false

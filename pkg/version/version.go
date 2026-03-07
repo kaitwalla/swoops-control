@@ -38,7 +38,9 @@ func (i Info) String() string {
 	if i.Version == "dev" {
 		return fmt.Sprintf("swoops dev (%s, built %s)", i.GitCommit, i.BuildTime)
 	}
-	return fmt.Sprintf("swoops v%s (%s)", i.Version, i.GitCommit)
+	// Strip 'v' prefix if already present to avoid "vv" in output
+	version := strings.TrimPrefix(i.Version, "v")
+	return fmt.Sprintf("swoops v%s (%s)", version, i.GitCommit)
 }
 
 // CheckUpdate queries GitHub releases API for the latest version
