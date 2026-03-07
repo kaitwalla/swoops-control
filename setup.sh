@@ -303,6 +303,118 @@ if [ "$SKIP_INTERACTIVE" = false ] && command -v swoopsd &> /dev/null; then
     FORCE_DOWNLOAD_BINARIES=true
 fi
 
+# Check if swoops-agent is already installed (skip in non-interactive mode)
+if [ "$SKIP_INTERACTIVE" = false ] && command -v swoops-agent &> /dev/null; then
+    AGENT_PATH=$(which swoops-agent)
+    AGENT_VERSION=$(swoops-agent version 2>/dev/null | head -1 || echo "unknown")
+
+    echo -e "${YELLOW}⚠${NC} swoops-agent is already installed at: $AGENT_PATH"
+    echo "  Current version: $AGENT_VERSION"
+    echo
+
+    if confirm "Would you like to update swoops-agent to the latest version?" "y"; then
+        info "Updating swoops-agent..."
+
+        # Download latest release from GitHub
+        GITHUB_REPO="kaitwalla/swoops-control"
+
+        # Detect architecture
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+            BINARY_ARCH="amd64"
+        elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            BINARY_ARCH="arm64"
+        else
+            error "Unsupported architecture: $ARCH"
+            exit 1
+        fi
+
+        # Detect OS
+        if [ "$OS" = "linux" ]; then
+            BINARY_OS="linux"
+        elif [ "$OS" = "macos" ]; then
+            BINARY_OS="darwin"
+        else
+            error "Unsupported OS: $OS"
+            exit 1
+        fi
+
+        # Get latest release info
+        info "Fetching latest release information..."
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/$GITHUB_REPO/releases/latest)
+        LATEST_VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+        if [ -z "$LATEST_VERSION" ]; then
+            error "Could not fetch latest release information"
+            exit 1
+        fi
+
+        info "Latest version: $LATEST_VERSION"
+
+        # Download binary
+        BINARY_NAME="swoops-agent-${BINARY_OS}-${BINARY_ARCH}"
+        DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$LATEST_VERSION/$BINARY_NAME"
+
+        info "Downloading from $DOWNLOAD_URL..."
+        TEMP_BINARY=$(mktemp)
+
+        if command -v curl &> /dev/null; then
+            if ! curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_BINARY"; then
+                error "Failed to download binary from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        elif command -v wget &> /dev/null; then
+            if ! wget -q "$DOWNLOAD_URL" -O "$TEMP_BINARY"; then
+                error "Failed to download binary from $DOWNLOAD_URL"
+                rm -f "$TEMP_BINARY"
+                exit 1
+            fi
+        else
+            error "Neither curl nor wget found. Please install one of them first."
+            exit 1
+        fi
+
+        # Make binary executable
+        chmod +x "$TEMP_BINARY"
+
+        # Stop the service before updating if it's running
+        if [ "$OS" = "linux" ] && systemctl is-active --quiet swoops-agent 2>/dev/null; then
+            info "Stopping swoops-agent service..."
+            sudo systemctl stop swoops-agent
+            AGENT_WAS_RUNNING=true
+        elif [ "$OS" = "macos" ] && launchctl list | grep -q com.swoops.agent 2>/dev/null; then
+            info "Stopping swoops-agent service..."
+            launchctl unload ~/Library/LaunchAgents/com.swoops.agent.plist 2>/dev/null || true
+            AGENT_WAS_RUNNING=true
+        fi
+
+        # Replace existing binary
+        info "Installing new binary to $AGENT_PATH..."
+        sudo mv "$TEMP_BINARY" "$AGENT_PATH"
+
+        # Restart the service if it was running
+        if [ "$AGENT_WAS_RUNNING" = true ]; then
+            if [ "$OS" = "linux" ]; then
+                info "Restarting swoops-agent service..."
+                sudo systemctl start swoops-agent
+                success "Agent service restarted"
+            elif [ "$OS" = "macos" ]; then
+                info "Restarting swoops-agent service..."
+                launchctl load ~/Library/LaunchAgents/com.swoops.agent.plist
+                success "Agent service restarted"
+            fi
+        fi
+
+        success "Update complete! Updated to $LATEST_VERSION"
+        exit 0
+    fi
+
+    echo
+    info "Continuing with full setup..."
+    echo
+fi
+
 if [ "$SKIP_INTERACTIVE" = false ]; then
     info "Detected OS: $OS ($INIT_SYSTEM)"
     echo
