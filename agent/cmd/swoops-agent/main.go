@@ -460,16 +460,56 @@ func (a *agentRuntime) handleControlMessage(msg *agentrpc.ControlEnvelope) error
 
 func (a *agentRuntime) handleLaunch(cmd *agentrpc.SessionCommand) error {
 	args := cmd.Args
+	sessionType := args["session_type"]
+	tmuxSession := args["tmux_session"]
+	if tmuxSession == "" {
+		tmuxSession = tmuxName(cmd.SessionID)
+	}
+
+	// Handle shell sessions (interactive terminals)
+	if sessionType == "shell" {
+		prompt := args["prompt"]
+		workDir := args["work_dir"]
+		if workDir == "" {
+			workDir = "~"
+		}
+
+		if err := a.tmux.CreateSession(tmuxSession, workDir); err != nil {
+			return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("create tmux session: %w", err))
+		}
+
+		// Send initial prompt if provided
+		if prompt != "" {
+			if err := a.tmux.SendKeys(tmuxSession, prompt); err != nil {
+				_ = a.tmux.KillSession(tmuxSession)
+				return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("send initial prompt: %w", err))
+			}
+		}
+
+		sr := &sessionRuntime{
+			sessionID:   cmd.SessionID,
+			tmuxSession: tmuxSession,
+			stopPoll:    make(chan struct{}),
+		}
+		a.mu.Lock()
+		if prev, ok := a.sessions[cmd.SessionID]; ok {
+			close(prev.stopPoll)
+		}
+		a.sessions[cmd.SessionID] = sr
+		a.mu.Unlock()
+		go a.pollOutput(sr)
+
+		return a.sendOutput(cmd.SessionID, "shell session launched via swoops-agent")
+	}
+
+	// Handle agent sessions (claude/codex in a worktree)
 	baseRepoPath := args["base_repo_path"]
 	worktreePath := args["worktree_path"]
 	branchName := args["branch_name"]
 	agentType := args["agent_type"]
 	prompt := args["prompt"]
 	modelOverride := args["model_override"]
-	tmuxSession := args["tmux_session"]
-	if tmuxSession == "" {
-		tmuxSession = tmuxName(cmd.SessionID)
-	}
+
 	if baseRepoPath == "" || worktreePath == "" || branchName == "" || prompt == "" || cmd.SessionID == "" {
 		return fmt.Errorf("launch command missing required args")
 	}

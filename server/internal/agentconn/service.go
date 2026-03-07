@@ -360,6 +360,7 @@ func (s *Service) IsHostConnected(hostID string) bool {
 
 func (s *Service) LaunchSession(sess *models.Session, host *models.Host) error {
 	args := map[string]string{
+		"session_type":   string(sess.Type),
 		"session_name":   sess.Name,
 		"agent_type":     string(sess.AgentType),
 		"prompt":         sess.Prompt,
