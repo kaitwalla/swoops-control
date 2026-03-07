@@ -271,7 +271,21 @@ func main() {
 			log.Printf("HTTP redirect server shutdown error: %v", err)
 		}
 	}
-	grpcServer.GracefulStop()
+
+	// Gracefully stop gRPC server with timeout
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(grpcDone)
+	}()
+
+	select {
+	case <-grpcDone:
+		log.Println("gRPC server stopped gracefully")
+	case <-time.After(5 * time.Second):
+		log.Println("gRPC graceful shutdown timed out, forcing stop")
+		grpcServer.Stop()
+	}
 
 	log.Println("Swoops control plane stopped")
 }
