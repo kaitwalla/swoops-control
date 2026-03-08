@@ -13,7 +13,7 @@ set -e
 #   Default: Current user ($(whoami))
 #   Production: Consider using your main user account or a dedicated user with proper shell access
 #
-SETUP_SCRIPT_VERSION="1.7.4"
+SETUP_SCRIPT_VERSION="1.7.5"
 
 # Parse command line arguments for non-interactive agent setup
 NON_INTERACTIVE=false

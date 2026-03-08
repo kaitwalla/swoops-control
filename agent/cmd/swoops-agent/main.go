@@ -635,6 +635,14 @@ func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
 
 	log.Printf("Starting agent update from v%s to v%s", updateInfo.CurrentVersion, updateInfo.LatestVersion)
 
+	// Construct the binary download URL based on current OS/arch
+	// Format: https://github.com/kaitwalla/swoops-control/releases/download/v1.7.4/swoops-agent-darwin-arm64
+	osName := runtime.GOOS
+	archName := runtime.GOARCH
+	binaryName := fmt.Sprintf("swoops-agent-%s-%s", osName, archName)
+	downloadURL := fmt.Sprintf("https://github.com/kaitwalla/swoops-control/releases/download/%s/%s",
+		updateInfo.LatestVersion, binaryName)
+
 	// Download new binary
 	tmpFile, err := os.CreateTemp("", "swoops-agent-*.tmp")
 	if err != nil {
@@ -643,11 +651,11 @@ func (a *agentRuntime) handleUpdateAgent(cmd *agentrpc.SessionCommand) error {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath) // Clean up if we fail
 
-	log.Printf("Downloading update from %s", updateInfo.UpdateURL)
+	log.Printf("Downloading update from %s", downloadURL)
 
 	// Use HTTP client with timeout to prevent hanging
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(updateInfo.UpdateURL)
+	resp, err := client.Get(downloadURL)
 	if err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("download update: %w", err)
