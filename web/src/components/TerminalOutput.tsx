@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { useReconnectingWebSocket } from '../hooks/useReconnectingWebSocket';
 
 interface TerminalOutputProps {
   /** Initial output to display */
@@ -19,7 +20,6 @@ export function TerminalOutput({ initialOutput, sessionId, isActive }: TerminalO
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const lastOutputRef = useRef<string>('');
 
   const writeOutput = useCallback((output: string) => {
@@ -97,73 +97,99 @@ export function TerminalOutput({ initialOutput, sessionId, isActive }: TerminalO
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // WebSocket streaming
-  useEffect(() => {
-    if (!sessionId || !isActive) return;
+  // Build WebSocket URL
+  const wsUrl = sessionId && isActive
+    ? (() => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const apiKey = localStorage.getItem('swoops_api_key') || '';
+        return `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(apiKey)}`;
+      })()
+    : '';
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const apiKey = localStorage.getItem('swoops_api_key') || '';
-    const ws = new WebSocket(
-      `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(apiKey)}`
-    );
-
-    ws.onmessage = (event) => {
+  // WebSocket streaming with automatic reconnection
+  const { state: wsState, retryCount, maxRetriesReached, reconnect } = useReconnectingWebSocket({
+    url: wsUrl,
+    enabled: !!sessionId && !!isActive && wsUrl !== '',
+    maxRetries: 0, // Infinite retries
+    initialBackoff: 1000, // Start at 1 second
+    maxBackoff: 30000, // Max 30 seconds
+    onMessage: (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output' && msg.data) {
           writeOutput(msg.data);
         }
-      } catch {
-        // ignore parse errors
+      } catch (error) {
+        console.error('Failed to parse WebSocket message:', error);
       }
-    };
+    },
+    onError: (error) => {
+      console.error('WebSocket error:', error);
+    },
+  });
 
-    ws.onerror = () => {
-      // Fall back to polling if WebSocket fails
-    };
+  // Get connection status message
+  const getConnectionStatus = () => {
+    if (!sessionId || !isActive) return null;
 
-    wsRef.current = ws;
+    if (wsState === 'connecting' && retryCount === 0) {
+      return { text: 'Connecting...', style: 'text-yellow-600 bg-yellow-50' };
+    }
 
-    return () => {
-      ws.close();
-      wsRef.current = null;
-    };
-  }, [sessionId, isActive, writeOutput]);
+    if (wsState === 'connecting' && retryCount > 0) {
+      return {
+        text: `Reconnecting (attempt ${retryCount})...`,
+        style: 'text-yellow-600 bg-yellow-50'
+      };
+    }
 
-  // Polling fallback: refresh output every 2s when active but no WebSocket
-  useEffect(() => {
-    if (!sessionId || !isActive) return;
+    if (wsState === 'closed' && !maxRetriesReached) {
+      return {
+        text: `Disconnected - reconnecting in ${Math.min(1000 * Math.pow(2, retryCount), 30000) / 1000}s...`,
+        style: 'text-red-600 bg-red-50'
+      };
+    }
 
-    const poll = setInterval(async () => {
-      // Only poll if WebSocket is not connected
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (maxRetriesReached) {
+      return {
+        text: 'Connection failed',
+        style: 'text-red-600 bg-red-50',
+        showRetry: true
+      };
+    }
 
-      try {
-        const resp = await fetch(`/api/v1/sessions/${sessionId}/output`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('swoops_api_key') || ''}`,
-          },
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.output) {
-            writeOutput(data.output);
-          }
-        }
-      } catch {
-        // ignore polling errors
-      }
-    }, 2000);
+    return null;
+  };
 
-    return () => clearInterval(poll);
-  }, [sessionId, isActive, writeOutput]);
+  const connectionStatus = getConnectionStatus();
 
   return (
-    <div
-      ref={terminalRef}
-      className="w-full"
-      style={{ minHeight: '300px', maxHeight: '600px' }}
-    />
+    <div className="relative w-full">
+      {connectionStatus && (
+        <div className={`absolute top-2 right-2 z-10 px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 ${connectionStatus.style} shadow-sm border border-current/20`}>
+          {wsState === 'connecting' && (
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          )}
+          <span>{connectionStatus.text}</span>
+          {connectionStatus.showRetry && (
+            <button
+              onClick={reconnect}
+              className="ml-2 px-2 py-0.5 bg-white/50 hover:bg-white/80 rounded text-xs font-semibold transition-colors"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        ref={terminalRef}
+        className="w-full"
+        style={{ minHeight: '300px', maxHeight: '600px' }}
+      />
+    </div>
   );
 }

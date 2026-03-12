@@ -3,9 +3,11 @@ module github.com/kaitwalla/swoops-control/agent
 go 1.25.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/kaitwalla/swoops-control/pkg v0.0.0
-	google.golang.org/grpc v1.77.0
 )
+
+require google.golang.org/grpc v1.77.0 // indirect
 
 require (
 	github.com/google/jsonschema-go v0.4.2 // indirect

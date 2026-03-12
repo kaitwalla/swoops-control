@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/gorilla/websocket"
+	"github.com/kaitwalla/swoops-control/server/internal/agentmgr"
 	"github.com/kaitwalla/swoops-control/server/internal/config"
 	"github.com/kaitwalla/swoops-control/server/internal/frontend"
 	"github.com/kaitwalla/swoops-control/server/internal/metrics"
@@ -23,6 +24,7 @@ type Server struct {
 	config     *config.Config
 	configMu   sync.RWMutex // Protects concurrent access to config
 	sessionMgr *sessionmgr.Manager
+	agentMgr   *agentmgr.Service
 	agentOut   AgentOutputSource
 	wsUpgrader websocket.Upgrader
 	router     chi.Router
@@ -55,6 +57,10 @@ func (s *Server) SetAgentController(controller sessionmgr.AgentController) {
 	if s.sessionMgr != nil {
 		s.sessionMgr.SetAgentController(controller)
 	}
+}
+
+func (s *Server) SetAgentManager(mgr *agentmgr.Service) {
+	s.agentMgr = mgr
 }
 
 func (s *Server) setupRoutes() {
@@ -121,6 +127,19 @@ func (s *Server) setupRoutes() {
 
 		// Client cert download (uses auth token for authentication, POST to avoid token in URL)
 		r.Post("/hosts/{id}/client-cert", s.handleGetClientCert)
+
+		// Agent REST API endpoints (use bearer token authentication)
+		r.Route("/agent", func(r chi.Router) {
+			r.Use(s.AgentAuth())
+
+			r.Post("/heartbeat", s.handleAgentHeartbeat)
+			r.Get("/commands/pending", s.handleGetPendingCommands)
+			r.Post("/command-results", s.handleAgentCommandResult)
+			r.Post("/sessions/{session_id}/output", s.handleAgentSessionOutput)
+		})
+
+		// Agent WebSocket connection (uses token query parameter for authentication)
+		r.Get("/ws/agent/connect", s.handleAgentWebSocket)
 
 		// All other API routes require authentication
 		r.Group(func(r chi.Router) {
@@ -238,4 +257,16 @@ func (s *Server) Close() {
 	if s.sessionMgr != nil {
 		s.sessionMgr.Close()
 	}
+	if s.agentMgr != nil {
+		s.agentMgr.Close()
+	}
+}
+
+// handleAgentWebSocket proxies to the agent manager's WebSocket handler.
+func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
+	if s.agentMgr == nil {
+		http.Error(w, "agent manager not initialized", http.StatusInternalServerError)
+		return
+	}
+	s.agentMgr.HandleAgentWebSocket(w, r)
 }

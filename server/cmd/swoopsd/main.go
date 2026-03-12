@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,18 +17,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
 	"github.com/kaitwalla/swoops-control/pkg/models"
 	"github.com/kaitwalla/swoops-control/pkg/version"
-	"github.com/kaitwalla/swoops-control/server/internal/agentconn"
+	"github.com/kaitwalla/swoops-control/server/internal/agentmgr"
 	"github.com/kaitwalla/swoops-control/server/internal/api"
 	"github.com/kaitwalla/swoops-control/server/internal/certrotate"
 	"github.com/kaitwalla/swoops-control/server/internal/config"
 	"github.com/kaitwalla/swoops-control/server/internal/store"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/term"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 func main() {
@@ -81,10 +77,13 @@ func main() {
 	srv := api.NewServer(db, cfg)
 	defer srv.Close()
 
-	agentSvc := agentconn.NewService(db, cfg, logger)
-	defer agentSvc.Close()
-	srv.SetAgentOutputSource(agentSvc)
-	srv.SetAgentController(agentSvc)
+	// Initialize agent manager (REST + WebSocket architecture)
+	agentMgr := agentmgr.New(db, logger)
+	defer agentMgr.Close()
+	srv.SetAgentManager(agentMgr)
+	// Set as output source and agent controller for session manager
+	srv.SetAgentOutputSource(agentMgr)
+	srv.SetAgentController(agentMgr)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpServer := &http.Server{
@@ -132,62 +131,6 @@ func main() {
 		log.Printf("Manual TLS configured with automatic certificate rotation (checking every 5 minutes)")
 		log.Printf("Certificate files: %s, %s", cfg.Server.TLSCert, cfg.Server.TLSKey)
 	}
-
-	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
-	grpcListener, err := net.Listen("tcp", grpcAddr)
-	if err != nil {
-		log.Fatalf("Failed to listen for gRPC on %s: %v", grpcAddr, err)
-	}
-
-	// Configure gRPC server with optional TLS and mTLS
-	var grpcServer *grpc.Server
-	var grpcCertRotator *certrotate.CertRotator
-
-	if cfg.GRPC.Insecure {
-		log.Printf("Warning: gRPC server running in INSECURE mode (no TLS)")
-		grpcServer = grpc.NewServer()
-	} else {
-		// Initialize certificate rotator for gRPC
-		caFile := ""
-		if cfg.GRPC.RequireMTLS {
-			caFile = cfg.GRPC.ClientCA
-		}
-
-		grpcCertRotator, err = certrotate.NewCertRotator(cfg.GRPC.TLSCert, cfg.GRPC.TLSKey, caFile, logger)
-		if err != nil {
-			log.Fatalf("Failed to initialize gRPC certificate rotator: %v", err)
-		}
-		defer grpcCertRotator.Stop()
-
-		tlsConfig := &tls.Config{
-			MinVersion:     tls.VersionTLS13,
-			GetCertificate: grpcCertRotator.GetCertificateFunc(),
-		}
-
-		// Configure mTLS if enabled
-		if cfg.GRPC.RequireMTLS {
-			// Use dynamic CA pool from cert rotator
-			tlsConfig.ClientCAs = grpcCertRotator.GetCACertPool()
-			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-			// Update GetConfigForClient to provide fresh CA pool for each connection
-			tlsConfig.GetConfigForClient = func(info *tls.ClientHelloInfo) (*tls.Config, error) {
-				config := tlsConfig.Clone()
-				config.ClientCAs = grpcCertRotator.GetCACertPool()
-				return config, nil
-			}
-
-			log.Printf("gRPC server configured with mTLS and automatic certificate rotation")
-			log.Printf("Server cert: %s, Client CA: %s", cfg.GRPC.TLSCert, cfg.GRPC.ClientCA)
-		} else {
-			log.Printf("gRPC server configured with TLS and automatic certificate rotation")
-			log.Printf("Server cert: %s", cfg.GRPC.TLSCert)
-		}
-
-		creds := credentials.NewTLS(tlsConfig)
-		grpcServer = grpc.NewServer(grpc.Creds(creds))
-	}
-	agentrpc.RegisterAgentServiceServer(grpcServer, agentSvc)
 
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -250,13 +193,6 @@ func main() {
 		}
 	}()
 
-	go func() {
-		log.Printf("Agent gRPC server starting on %s", grpcAddr)
-		if err := grpcServer.Serve(grpcListener); err != nil {
-			log.Fatalf("gRPC server error: %v", err)
-		}
-	}()
-
 	<-ctx.Done()
 	log.Println("Shutting down...")
 
@@ -270,21 +206,6 @@ func main() {
 		if err := httpRedirectServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("HTTP redirect server shutdown error: %v", err)
 		}
-	}
-
-	// Gracefully stop gRPC server with timeout
-	grpcDone := make(chan struct{})
-	go func() {
-		grpcServer.GracefulStop()
-		close(grpcDone)
-	}()
-
-	select {
-	case <-grpcDone:
-		log.Println("gRPC server stopped gracefully")
-	case <-time.After(5 * time.Second):
-		log.Println("gRPC graceful shutdown timed out, forcing stop")
-		grpcServer.Stop()
 	}
 
 	log.Println("Swoops control plane stopped")

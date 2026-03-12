@@ -263,6 +263,12 @@ func (s *Store) UpdateHostStatus(id string, status models.HostStatus) error {
 	return checkRowsAffected(res)
 }
 
+// GetHostByAuthToken retrieves a host by its agent auth token.
+func (s *Store) GetHostByAuthToken(token string) (*models.Host, error) {
+	row := s.db.QueryRow(`SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_path, os, arch, status, agent_version, agent_auth_token, labels_json, max_sessions, base_repo_path, worktree_root, installed_plugins_json, installed_tools_json, last_heartbeat, update_available, latest_version, update_url, created_at, updated_at FROM hosts WHERE agent_auth_token = ?`, token)
+	return scanHost(row)
+}
+
 // ---- Session CRUD ----
 
 func (s *Store) CreateSession(sess *models.Session) error {

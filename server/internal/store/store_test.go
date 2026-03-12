@@ -132,7 +132,7 @@ func TestHostHeartbeatAndStatusUpdates(t *testing.T) {
 	}
 
 	heartbeatAt := now.Add(3 * time.Second)
-	if err := s.UpsertHostHeartbeat(h.ID, "v0.3.0", "linux", "arm64", heartbeatAt); err != nil {
+	if err := s.UpsertHostHeartbeat(h.ID, "v0.3.0", "linux", "arm64", "test-hostname", "swoops", heartbeatAt); err != nil {
 		t.Fatalf("UpsertHostHeartbeat: %v", err)
 	}
 	got, err := s.GetHost(h.ID)

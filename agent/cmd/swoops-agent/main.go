@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -11,10 +12,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,13 +23,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/kaitwalla/swoops-control/pkg/agentrpc"
 	"github.com/kaitwalla/swoops-control/pkg/tmux"
 	"github.com/kaitwalla/swoops-control/pkg/version"
 	"github.com/kaitwalla/swoops-control/pkg/worktree"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -77,7 +76,7 @@ func main() {
 
 func runCommand(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	serverAddr := fs.String("server", "127.0.0.1:9090", "control-plane gRPC address")
+	serverAddr := fs.String("server", "127.0.0.1:8080", "control-plane HTTP address")
 	hostID := fs.String("host-id", "", "registered host ID from control plane")
 	authToken := fs.String("auth-token", "", "agent authentication token (or set SWOOPS_AGENT_TOKEN)")
 	hostName := fs.String("host-name", "", "logical host name override (defaults to OS hostname)")
@@ -150,10 +149,64 @@ func runCommand(args []string) error {
 	versionInfo := version.Get()
 	log.Printf("swoops-agent starting: %s host_id=%s server=%s insecure=%v", versionInfo.String(), *hostID, *serverAddr, *insecure)
 
-	// Create a channel to send update info to the runtime
-	updateInfoChan := make(chan *version.UpdateInfo, 1)
+	tlsConfig := &tlsClientConfig{
+		insecure:  *insecure,
+		tlsCert:   *tlsCert,
+		tlsKey:    *tlsKey,
+		serverCA:  *serverCA,
+	}
 
-	// Check for updates periodically in background
+	// Run the agent with REST + WebSocket
+	return runAgentHTTP(ctx, *serverAddr, *hostID, token, name, tlsConfig)
+}
+
+type tlsClientConfig struct {
+	insecure  bool
+	tlsCert   string
+	tlsKey    string
+	serverCA  string
+}
+
+// agentHTTPClient is the HTTP client for communicating with the control plane.
+type agentHTTPClient struct {
+	baseURL    string
+	httpClient *http.Client
+	token      string
+	hostID     string
+}
+
+// runAgentHTTP runs the agent using REST + WebSocket instead of gRPC.
+func runAgentHTTP(ctx context.Context, serverAddr, hostID, authToken, hostName string, tlsConfig *tlsClientConfig) error {
+	// Build HTTP client with TLS configuration
+	httpClient, err := buildHTTPClient(tlsConfig)
+	if err != nil {
+		return fmt.Errorf("build HTTP client: %w", err)
+	}
+
+	// Determine base URL (http:// or https://)
+	scheme := "http"
+	if !tlsConfig.insecure {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s", scheme, serverAddr)
+
+	client := &agentHTTPClient{
+		baseURL:    baseURL,
+		httpClient: httpClient,
+		token:      authToken,
+		hostID:     hostID,
+	}
+
+	rt := &agentRuntime{
+		tmux:                &tmux.Runner{},
+		wt:                  &worktree.Manager{},
+		client:              client,
+		sessions:            make(map[string]*sessionRuntime),
+		commandNotification: make(chan struct{}, 1),
+	}
+
+	// Start update checker in background
+	updateInfoChan := make(chan *version.UpdateInfo, 1)
 	go func() {
 		checkForUpdate := func() {
 			checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -190,203 +243,194 @@ func runCommand(args []string) error {
 		}
 	}()
 
-	tlsConfig := &tlsClientConfig{
-		insecure:  *insecure,
-		tlsCert:   *tlsCert,
-		tlsKey:    *tlsKey,
-		serverCA:  *serverCA,
-	}
+	// Start WebSocket notification listener (with reconnection)
+	go rt.listenForNotifications(ctx, serverAddr, authToken, tlsConfig)
 
-	backoff := time.Second
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
+	// Heartbeat ticker
+	heartbeatTicker := time.NewTicker(10 * time.Second)
+	defer heartbeatTicker.Stop()
 
-		err := connectAndRun(ctx, *serverAddr, *hostID, token, name, tlsConfig, updateInfoChan)
-		if err == nil || errors.Is(err, context.Canceled) {
-			return nil
-		}
+	// Fallback polling ticker (if WS disconnected)
+	pollTicker := time.NewTicker(5 * time.Second)
+	defer pollTicker.Stop()
 
-		log.Printf("agent connection closed: %v (retry in %s)", err, backoff)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(backoff):
-		}
-		if backoff < 30*time.Second {
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
-		}
-	}
-}
-
-type tlsClientConfig struct {
-	insecure  bool
-	tlsCert   string
-	tlsKey    string
-	serverCA  string
-}
-
-func connectAndRun(ctx context.Context, serverAddr, hostID, authToken, hostName string, tlsConfig *tlsClientConfig, updateInfoChan <-chan *version.UpdateInfo) error {
-	// Configure gRPC credentials based on TLS settings
-	var creds credentials.TransportCredentials
-	if tlsConfig.insecure {
-		creds = insecure.NewCredentials()
-	} else {
-		config := &tls.Config{
-			MinVersion: tls.VersionTLS13,
-		}
-
-		// Load client certificate if provided (for mTLS)
-		if tlsConfig.tlsCert != "" && tlsConfig.tlsKey != "" {
-			cert, err := tls.LoadX509KeyPair(tlsConfig.tlsCert, tlsConfig.tlsKey)
-			if err != nil {
-				return fmt.Errorf("load client certificate: %w", err)
-			}
-			config.Certificates = []tls.Certificate{cert}
-			log.Printf("loaded client certificate for mTLS: %s", tlsConfig.tlsCert)
-		}
-
-		// Load server CA certificate if provided
-		if tlsConfig.serverCA != "" {
-			caCert, err := os.ReadFile(tlsConfig.serverCA)
-			if err != nil {
-				return fmt.Errorf("read server CA certificate: %w", err)
-			}
-
-			certPool := x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caCert) {
-				return fmt.Errorf("failed to parse server CA certificate")
-			}
-
-			config.RootCAs = certPool
-			log.Printf("loaded server CA certificate: %s", tlsConfig.serverCA)
-		}
-
-		creds = credentials.NewTLS(config)
-	}
-
-	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(creds))
-	if err != nil {
-		return fmt.Errorf("dial control plane: %w", err)
-	}
-	defer conn.Close()
-
-	client := agentrpc.NewAgentServiceClient(conn)
-	stream, err := client.Connect(ctx)
-	if err != nil {
-		return fmt.Errorf("open stream: %w", err)
-	}
-
-	outbound := make(chan *agentrpc.AgentEnvelope, 256)
-	sendErr := make(chan error, 1)
-	go func() {
-		for msg := range outbound {
-			if err := stream.Send(msg); err != nil {
-				sendErr <- err
-				return
-			}
-		}
-		sendErr <- nil
-	}()
-
-	rt := newAgentRuntime(outbound)
-
-	// Get current user
-	currentUser := os.Getenv("USER")
-	if currentUser == "" {
-		currentUser = os.Getenv("USERNAME") // Windows fallback
-	}
-	if currentUser == "" {
-		if u, err := user.Current(); err == nil {
-			currentUser = u.Username
-		}
-	}
-
-	select {
-	case outbound <- &agentrpc.AgentEnvelope{
-		Hello: &agentrpc.AgentHello{
-			HostID:       hostID,
-			AuthToken:    authToken,
-			HostName:     hostName,
-			AgentVersion: version.Get().Version,
-			OS:           runtime.GOOS,
-			Arch:         runtime.GOARCH,
-			AgentUser:    currentUser,
-		},
-	}:
-	case err := <-sendErr:
-		return fmt.Errorf("send hello: %w", err)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	recvDone := make(chan error, 1)
-	go func() {
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					recvDone <- nil
-					return
-				}
-				recvDone <- err
-				return
-			}
-			if err := rt.handleControlMessage(msg); err != nil {
-				recvDone <- err
-				return
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+	log.Printf("agent started with REST + WebSocket")
 
 	for {
 		select {
 		case <-ctx.Done():
 			rt.close()
-			_ = stream.CloseSend()
 			return ctx.Err()
-		case err := <-recvDone:
-			rt.close()
-			return err
-		case err := <-sendErr:
-			rt.close()
-			return err
+
 		case updateInfo := <-updateInfoChan:
 			rt.setUpdateInfo(updateInfo)
-		case <-ticker.C:
-			hb := &agentrpc.Heartbeat{
-				SentUnix:        time.Now().Unix(),
-				RunningSessions: int32(rt.runningSessions()),
+
+		case <-heartbeatTicker.C:
+			status := rt.getHeartbeatStatus()
+			if err := client.sendHeartbeat(ctx, status); err != nil {
+				log.Printf("heartbeat failed: %v", err)
 			}
-			if updateInfo := rt.getUpdateInfo(); updateInfo != nil {
-				hb.UpdateAvailable = updateInfo.UpdateAvailable
-				hb.CurrentVersion = updateInfo.CurrentVersion
-				hb.LatestVersion = updateInfo.LatestVersion
-				hb.UpdateURL = updateInfo.UpdateURL
-			}
-			select {
-			case outbound <- &agentrpc.AgentEnvelope{
-				Heartbeat: hb,
-			}:
-			case err := <-sendErr:
-				rt.close()
-				return fmt.Errorf("send heartbeat: %w", err)
-			case <-ctx.Done():
-				rt.close()
-				_ = stream.CloseSend()
-				return ctx.Err()
+
+		case <-rt.commandNotification:
+			// WebSocket notification received
+			rt.pollAndExecuteCommands(ctx)
+
+		case <-pollTicker.C:
+			// Fallback polling if WebSocket disconnected
+			rt.mu.Lock()
+			wsConnected := rt.wsConnected
+			rt.mu.Unlock()
+			if !wsConnected {
+				rt.pollAndExecuteCommands(ctx)
 			}
 		}
 	}
+}
+
+// buildHTTPClient creates an HTTP client with the specified TLS configuration.
+func buildHTTPClient(tlsConfig *tlsClientConfig) (*http.Client, error) {
+	if tlsConfig.insecure {
+		return &http.Client{Timeout: 30 * time.Second}, nil
+	}
+
+	config := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+
+	// Load client certificate if provided (for mTLS)
+	if tlsConfig.tlsCert != "" && tlsConfig.tlsKey != "" {
+		cert, err := tls.LoadX509KeyPair(tlsConfig.tlsCert, tlsConfig.tlsKey)
+		if err != nil {
+			return nil, fmt.Errorf("load client certificate: %w", err)
+		}
+		config.Certificates = []tls.Certificate{cert}
+		log.Printf("loaded client certificate for mTLS: %s", tlsConfig.tlsCert)
+	}
+
+	// Load server CA certificate if provided
+	if tlsConfig.serverCA != "" {
+		caCert, err := os.ReadFile(tlsConfig.serverCA)
+		if err != nil {
+			return nil, fmt.Errorf("read server CA certificate: %w", err)
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse server CA certificate")
+		}
+
+		config.RootCAs = certPool
+		log.Printf("loaded server CA certificate: %s", tlsConfig.serverCA)
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: config,
+	}
+
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}, nil
+}
+
+// HTTP client methods
+
+func (c *agentHTTPClient) sendHeartbeat(ctx context.Context, status heartbeatStatus) error {
+	body := map[string]interface{}{
+		"host_id":          c.hostID,
+		"running_sessions": status.RunningSessions,
+		"update_available": status.UpdateAvailable,
+		"current_version":  status.CurrentVersion,
+		"latest_version":   status.LatestVersion,
+		"update_url":       status.UpdateURL,
+	}
+
+	return c.postJSON(ctx, "/api/v1/agent/heartbeat", body, nil)
+}
+
+func (c *agentHTTPClient) pollCommands(ctx context.Context) ([]*agentrpc.SessionCommand, error) {
+	var resp struct {
+		Commands []*agentrpc.SessionCommand `json:"commands"`
+	}
+
+	if err := c.getJSON(ctx, "/api/v1/agent/commands/pending", &resp); err != nil {
+		return nil, err
+	}
+
+	return resp.Commands, nil
+}
+
+func (c *agentHTTPClient) sendOutput(ctx context.Context, sessionID, content string, eof bool) error {
+	body := map[string]interface{}{
+		"session_id": sessionID,
+		"content":    content,
+		"eof":        eof,
+	}
+
+	url := fmt.Sprintf("/api/v1/agent/sessions/%s/output", sessionID)
+	return c.postJSON(ctx, url, body, nil)
+}
+
+func (c *agentHTTPClient) sendCommandResult(ctx context.Context, result *agentrpc.CommandResult) error {
+	return c.postJSON(ctx, "/api/v1/agent/command-results", result, nil)
+}
+
+func (c *agentHTTPClient) postJSON(ctx context.Context, path string, body, resp interface{}) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	httpResp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		return fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
+	}
+
+	if resp != nil {
+		return json.NewDecoder(httpResp.Body).Decode(resp)
+	}
+
+	return nil
+}
+
+func (c *agentHTTPClient) getJSON(ctx context.Context, path string, resp interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	httpResp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(httpResp.Body)
+		return fmt.Errorf("unexpected status %d: %s", httpResp.StatusCode, string(bodyBytes))
+	}
+
+	if resp != nil {
+		return json.NewDecoder(httpResp.Body).Decode(resp)
+	}
+
+	return nil
 }
 
 type sessionRuntime struct {
@@ -399,23 +443,23 @@ type sessionRuntime struct {
 }
 
 type agentRuntime struct {
-	tmux *tmux.Runner
-	wt   *worktree.Manager
+	tmux   *tmux.Runner
+	wt     *worktree.Manager
+	client *agentHTTPClient
 
-	outbound chan<- *agentrpc.AgentEnvelope
-
-	mu              sync.Mutex
-	sessions        map[string]*sessionRuntime
-	updateInfo      *version.UpdateInfo
+	mu                  sync.Mutex
+	sessions            map[string]*sessionRuntime
+	updateInfo          *version.UpdateInfo
+	wsConnected         bool
+	commandNotification chan struct{}
 }
 
-func newAgentRuntime(outbound chan<- *agentrpc.AgentEnvelope) *agentRuntime {
-	return &agentRuntime{
-		tmux:     &tmux.Runner{},
-		wt:       &worktree.Manager{},
-		outbound: outbound,
-		sessions: make(map[string]*sessionRuntime),
-	}
+type heartbeatStatus struct {
+	RunningSessions int
+	UpdateAvailable bool
+	CurrentVersion  string
+	LatestVersion   string
+	UpdateURL       string
 }
 
 func (a *agentRuntime) close() {
@@ -777,17 +821,7 @@ func (a *agentRuntime) pollOutput(sr *sessionRuntime) {
 }
 
 func (a *agentRuntime) sendOutput(sessionID, content string) error {
-	select {
-	case a.outbound <- &agentrpc.AgentEnvelope{
-		Output: &agentrpc.SessionOutput{
-			SessionID: sessionID,
-			Content:   content,
-		},
-	}:
-		return nil
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("timed out sending output envelope")
-	}
+	return a.client.sendOutput(context.Background(), sessionID, content, false)
 }
 
 func (a *agentRuntime) sendErrorOutput(sessionID string, err error) error {
@@ -799,18 +833,164 @@ func (a *agentRuntime) sendErrorOutput(sessionID string, err error) error {
 }
 
 func (a *agentRuntime) sendCommandResult(cmd *agentrpc.SessionCommand, ok bool, message string) error {
-	select {
-	case a.outbound <- &agentrpc.AgentEnvelope{
-		CommandResult: &agentrpc.CommandResult{
-			CommandID: cmd.CommandID,
-			SessionID: cmd.SessionID,
-			Ok:        ok,
-			Message:   message,
-		},
-	}:
-		return nil
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("timed out sending command result")
+	result := &agentrpc.CommandResult{
+		CommandID: cmd.CommandID,
+		SessionID: cmd.SessionID,
+		Ok:        ok,
+		Message:   message,
+	}
+	return a.client.sendCommandResult(context.Background(), result)
+}
+
+func (a *agentRuntime) getHeartbeatStatus() heartbeatStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	status := heartbeatStatus{
+		RunningSessions: len(a.sessions),
+	}
+
+	if a.updateInfo != nil {
+		status.UpdateAvailable = a.updateInfo.UpdateAvailable
+		status.CurrentVersion = a.updateInfo.CurrentVersion
+		status.LatestVersion = a.updateInfo.LatestVersion
+		status.UpdateURL = a.updateInfo.UpdateURL
+	}
+
+	return status
+}
+
+func (a *agentRuntime) pollAndExecuteCommands(ctx context.Context) {
+	commands, err := a.client.pollCommands(ctx)
+	if err != nil {
+		log.Printf("poll commands failed: %v", err)
+		return
+	}
+
+	for _, cmd := range commands {
+		// Execute command in goroutine
+		go func(cmd *agentrpc.SessionCommand) {
+			var err error
+			switch cmd.Command {
+			case agentrpc.CommandLaunch:
+				err = a.handleLaunch(cmd)
+			case agentrpc.CommandStop:
+				err = a.handleStop(cmd)
+			case agentrpc.CommandInput:
+				err = a.handleInput(cmd)
+			case agentrpc.CommandUpdateAgent:
+				err = a.handleUpdateAgent(cmd)
+			case agentrpc.CommandCheckForUpdates:
+				err = a.handleCheckForUpdates(cmd)
+			default:
+				_ = a.sendCommandResult(cmd, true, "")
+				return
+			}
+
+			if err != nil {
+				if sendErr := a.sendCommandResult(cmd, false, err.Error()); sendErr != nil {
+					log.Printf("failed to send command result: %v", sendErr)
+				}
+				return
+			}
+			_ = a.sendCommandResult(cmd, true, "")
+		}(cmd)
+	}
+}
+
+func (a *agentRuntime) listenForNotifications(ctx context.Context, serverAddr, token string, tlsConfig *tlsClientConfig) {
+	backoff := time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		err := a.connectWebSocket(ctx, serverAddr, token, tlsConfig)
+		if err == nil {
+			return // Clean shutdown
+		}
+
+		log.Printf("websocket connection lost: %v (retry in %s)", err, backoff)
+
+		a.mu.Lock()
+		a.wsConnected = false
+		a.mu.Unlock()
+
+		time.Sleep(backoff)
+
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	}
+}
+
+func (a *agentRuntime) connectWebSocket(ctx context.Context, serverAddr, token string, tlsConfig *tlsClientConfig) error {
+	scheme := "wss"
+	if tlsConfig.insecure {
+		scheme = "ws"
+	}
+
+	wsURL := fmt.Sprintf("%s://%s/api/v1/ws/agent/connect?token=%s", scheme, serverAddr, url.QueryEscape(token))
+
+	dialer := &websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	// Configure TLS if needed
+	if !tlsConfig.insecure {
+		config := &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+
+		if tlsConfig.serverCA != "" {
+			caCert, err := os.ReadFile(tlsConfig.serverCA)
+			if err != nil {
+				return fmt.Errorf("read CA cert: %w", err)
+			}
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return fmt.Errorf("failed to parse CA certificate")
+			}
+			config.RootCAs = caCertPool
+		}
+
+		dialer.TLSClientConfig = config
+	}
+
+	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	defer conn.Close()
+
+	a.mu.Lock()
+	a.wsConnected = true
+	a.mu.Unlock()
+
+	log.Printf("websocket connected")
+
+	// Read loop - just listen for notifications
+	for {
+		var msg map[string]interface{}
+		if err := conn.ReadJSON(&msg); err != nil {
+			return fmt.Errorf("read: %w", err)
+		}
+
+		msgType, _ := msg["type"].(string)
+		if msgType == "new_command" {
+			// Notify main loop to poll for commands
+			select {
+			case a.commandNotification <- struct{}{}:
+			default:
+				// Already has notification pending, skip
+			}
+		}
 	}
 }
 
