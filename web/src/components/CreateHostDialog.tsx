@@ -27,6 +27,7 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
     labels: {},
     base_repo_path: '/opt/swoops/repo',
     worktree_root: '/opt/swoops/worktrees',
+    default_root_directory: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -255,6 +256,17 @@ export function CreateHostDialog({ open, onClose, onSubmit }: Props) {
               />
             </label>
           </div>
+
+          <label className="block">
+            <span className="text-sm text-gray-400">Default Root Directory (for agent sessions)</span>
+            <input
+              className="mt-1 w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+              value={form.default_root_directory}
+              onChange={(e) => update('default_root_directory', e.target.value)}
+              placeholder="/home/user/projects"
+            />
+            <span className="text-xs text-gray-500 mt-1">Leave empty to use home directory</span>
+          </label>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 

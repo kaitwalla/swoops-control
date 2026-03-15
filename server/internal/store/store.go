@@ -293,10 +293,10 @@ func (s *Store) CreateSession(sess *models.Session) error {
 	flagsJSON, _ := json.Marshal(sess.ExtraFlags)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO sessions (id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, working_directory, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Name, sess.HostID, sess.TemplateID, sess.Type, sess.AgentType,
-		sess.Status, sess.Prompt, sess.BranchName, sess.WorktreePath,
+		sess.Status, sess.Prompt, sess.BranchName, sess.WorktreePath, sess.WorkingDirectory,
 		sess.TmuxSessionName, sess.AgentPID, sess.ModelOverride,
 		string(envJSON), string(mcpJSON), string(pluginsJSON),
 		string(toolsJSON), string(flagsJSON),
@@ -306,12 +306,12 @@ func (s *Store) CreateSession(sess *models.Session) error {
 }
 
 func (s *Store) GetSession(id string) (*models.Session, error) {
-	row := s.db.QueryRow(`SELECT id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, last_output, started_at, stopped_at, created_at, updated_at FROM sessions WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, working_directory, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, last_output, started_at, stopped_at, created_at, updated_at FROM sessions WHERE id = ?`, id)
 	return scanSession(row)
 }
 
 func (s *Store) ListSessions(hostID, status string) ([]*models.Session, error) {
-	query := `SELECT id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, last_output, started_at, stopped_at, created_at, updated_at FROM sessions WHERE 1=1`
+	query := `SELECT id, name, host_id, template_id, type, agent_type, status, prompt, branch_name, worktree_path, working_directory, tmux_session, agent_pid, model_override, env_vars_json, mcp_servers_json, plugins_json, allowed_tools_json, extra_flags_json, last_output, started_at, stopped_at, created_at, updated_at FROM sessions WHERE 1=1`
 	var args []interface{}
 
 	if hostID != "" {
@@ -493,7 +493,7 @@ func scanSession(row scannable) (*models.Session, error) {
 
 	err := row.Scan(
 		&sess.ID, &sess.Name, &sess.HostID, &sess.TemplateID, &sess.Type, &sess.AgentType,
-		&sess.Status, &sess.Prompt, &sess.BranchName, &sess.WorktreePath,
+		&sess.Status, &sess.Prompt, &sess.BranchName, &sess.WorktreePath, &sess.WorkingDirectory,
 		&sess.TmuxSessionName, &sess.AgentPID, &sess.ModelOverride,
 		&envJSON, &mcpJSON, &pluginsJSON, &toolsJSON, &flagsJSON,
 		&sess.LastOutput, &startedAt, &stoppedAt,

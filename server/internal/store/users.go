@@ -54,12 +54,12 @@ func (s *Store) GetUserByUsername(username string) (*models.User, error) {
 	var lastLoginAt sql.NullTime
 
 	err := s.db.QueryRow(`
-		SELECT id, username, email, password_hash, full_name, is_active, is_admin, last_login_at, created_at, updated_at
+		SELECT id, username, email, password_hash, full_name, is_active, is_admin, github_token, last_login_at, created_at, updated_at
 		FROM users
 		WHERE username = ?
 	`, username).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash,
-		&user.FullName, &user.IsActive, &user.IsAdmin,
+		&user.FullName, &user.IsActive, &user.IsAdmin, &user.GitHubToken,
 		&lastLoginAt, &user.CreatedAt, &user.UpdatedAt,
 	)
 
@@ -83,12 +83,12 @@ func (s *Store) GetUserByID(id string) (*models.User, error) {
 	var lastLoginAt sql.NullTime
 
 	err := s.db.QueryRow(`
-		SELECT id, username, email, password_hash, full_name, is_active, is_admin, last_login_at, created_at, updated_at
+		SELECT id, username, email, password_hash, full_name, is_active, is_admin, github_token, last_login_at, created_at, updated_at
 		FROM users
 		WHERE id = ?
 	`, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash,
-		&user.FullName, &user.IsActive, &user.IsAdmin,
+		&user.FullName, &user.IsActive, &user.IsAdmin, &user.GitHubToken,
 		&lastLoginAt, &user.CreatedAt, &user.UpdatedAt,
 	)
 
@@ -286,4 +286,29 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 	}
 
 	return users, nil
+}
+
+// UpdateUserGitHubToken updates a user's GitHub personal access token.
+func (s *Store) UpdateUserGitHubToken(userID, token string) error {
+	now := time.Now()
+	result, err := s.db.Exec(`
+		UPDATE users
+		SET github_token = ?, updated_at = ?
+		WHERE id = ?
+	`, token, now, userID)
+
+	if err != nil {
+		return fmt.Errorf("update github token: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }

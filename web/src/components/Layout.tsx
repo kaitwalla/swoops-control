@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, Terminal, Puzzle, FileSliders, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, Server, Terminal, Puzzle, FileSliders, LogOut, User, Settings } from 'lucide-react';
 import { UpdateBanner } from './UpdateBanner';
 import { useAuthStore } from '../stores/authStore';
 
@@ -52,6 +52,19 @@ export function Layout() {
             <User size={14} />
             <span className="truncate">{user?.username || 'User'}</span>
           </div>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+                isActive
+                  ? 'bg-gray-800 text-white'
+                  : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+              }`
+            }
+          >
+            <Settings size={16} />
+            Settings
+          </NavLink>
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-400 hover:bg-gray-800/50 hover:text-gray-200 transition-colors"

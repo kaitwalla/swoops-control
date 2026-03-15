@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -10,22 +12,26 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/go-github/v60/github"
 	"github.com/kaitwalla/swoops-control/pkg/models"
+	"golang.org/x/oauth2"
 )
 
 type createSessionRequest struct {
-	Name          string            `json:"name"`
-	HostID        string            `json:"host_id"`
-	Type          models.SessionType `json:"type"`
-	AgentType     models.AgentType  `json:"agent_type"`
-	Prompt        string            `json:"prompt"`
-	BranchName    string            `json:"branch_name"`
-	TemplateID    string            `json:"template_id"`
-	ModelOverride string            `json:"model_override"`
-	EnvVars       map[string]string `json:"env_vars"`
-	Plugins       []string          `json:"plugins"`
-	AllowedTools  []string          `json:"allowed_tools"`
-	ExtraFlags    []string          `json:"extra_flags"`
+	Name             string                   `json:"name"`
+	HostID           string                   `json:"host_id"`
+	Type             models.SessionType       `json:"type"`
+	AgentType        models.AgentType         `json:"agent_type"`
+	Prompt           string                   `json:"prompt"`
+	BranchName       string                   `json:"branch_name"`
+	TemplateID       string                   `json:"template_id"`
+	ModelOverride    string                   `json:"model_override"`
+	EnvVars          map[string]string        `json:"env_vars"`
+	Plugins          []string                 `json:"plugins"`
+	AllowedTools     []string                 `json:"allowed_tools"`
+	ExtraFlags       []string                 `json:"extra_flags"`
+	WorkingDirectory string                   `json:"working_directory"`
+	DirectorySource  *models.DirectorySource  `json:"directory_source"`
 }
 
 type sendInputRequest struct {
@@ -67,6 +73,134 @@ func validateEnvVars(envVars map[string]string) (string, bool) {
 		}
 	}
 	return "", true
+}
+
+// processDirectorySource handles setting up the working directory based on the source type.
+// This must be called synchronously before session creation to ensure the directory exists.
+func (s *Server) processDirectorySource(ctx context.Context, hostID string, host *models.Host, source *models.DirectorySource) error {
+	switch source.Type {
+	case models.DirectorySourceExisting:
+		// Existing directory - no action needed, just verify it exists
+		if source.ExistingPath == "" {
+			return fmt.Errorf("existing_path is required for existing directory source")
+		}
+		// Directory existence will be verified during session launch
+		return nil
+
+	case models.DirectorySourceNewFolder:
+		// Create new folder
+		if source.NewFolderName == "" {
+			return fmt.Errorf("new_folder_name is required for new_folder source")
+		}
+		if host.DefaultRootDirectory == "" {
+			return fmt.Errorf("host does not have default_root_directory configured")
+		}
+
+		// Create directory via filesystem API
+		req := CreateDirectoryRequest{
+			Path: host.DefaultRootDirectory,
+			Name: source.NewFolderName,
+		}
+
+		if err := s.createDirectoryOnHost(host, req); err != nil {
+			return fmt.Errorf("create directory: %w", err)
+		}
+		return nil
+
+	case models.DirectorySourceCloneRepo:
+		// Clone repository
+		if source.RepoURL == "" {
+			return fmt.Errorf("repo_url is required for clone_repo source")
+		}
+		if host.DefaultRootDirectory == "" {
+			return fmt.Errorf("host does not have default_root_directory configured")
+		}
+
+		// Clone repository via filesystem API
+		req := CloneRepositoryRequest{
+			Path:       host.DefaultRootDirectory,
+			RepoURL:    source.RepoURL,
+			FolderName: source.CloneFolderName,
+		}
+
+		if err := s.cloneRepositoryOnHost(host, req); err != nil {
+			return fmt.Errorf("clone repository: %w", err)
+		}
+		return nil
+
+	case models.DirectorySourceNewRepo:
+		// Create new GitHub repo and clone it
+		if source.RepoName == "" {
+			return fmt.Errorf("repo_name is required for new_repo source")
+		}
+		if host.DefaultRootDirectory == "" {
+			return fmt.Errorf("host does not have default_root_directory configured")
+		}
+
+		// Get current user to access GitHub token
+		userID, ok := UserIDFromContext(ctx)
+		if !ok {
+			return fmt.Errorf("user not authenticated")
+		}
+
+		user, err := s.store.GetUserByID(userID)
+		if err != nil {
+			return fmt.Errorf("get user: %w", err)
+		}
+
+		if user.GitHubToken == "" {
+			return fmt.Errorf("GitHub token not configured")
+		}
+
+		// Create GitHub repository
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: user.GitHubToken})
+		tc := oauth2.NewClient(ctx, ts)
+		client := github.NewClient(tc)
+
+		repo := &github.Repository{
+			Name:        github.String(source.RepoName),
+			Description: github.String(source.RepoDescription),
+			Private:     github.Bool(source.RepoPrivate),
+			AutoInit:    github.Bool(true),
+		}
+
+		createdRepo, _, err := client.Repositories.Create(ctx, "", repo)
+		if err != nil {
+			return fmt.Errorf("create GitHub repository: %w", err)
+		}
+
+		// Clone the newly created repository
+		cloneReq := CloneRepositoryRequest{
+			Path:       host.DefaultRootDirectory,
+			RepoURL:    createdRepo.GetCloneURL(),
+			FolderName: source.RepoName,
+		}
+
+		if err := s.cloneRepositoryOnHost(host, cloneReq); err != nil {
+			return fmt.Errorf("clone new repository: %w", err)
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown directory source type: %s", source.Type)
+	}
+}
+
+// createDirectoryOnHost creates a directory on the specified host
+func (s *Server) createDirectoryOnHost(host *models.Host, req CreateDirectoryRequest) error {
+	cmd := fmt.Sprintf("mkdir -p %s", shellQuote(filepath.Join(req.Path, req.Name)))
+	_, err := s.executeCommandOnHost(host, cmd)
+	return err
+}
+
+// cloneRepositoryOnHost clones a git repository on the specified host
+func (s *Server) cloneRepositoryOnHost(host *models.Host, req CloneRepositoryRequest) error {
+	cloneCmd := fmt.Sprintf("cd %s && git clone %s", shellQuote(req.Path), shellQuote(req.RepoURL))
+	if req.FolderName != "" {
+		cloneCmd += " " + shellQuote(req.FolderName)
+	}
+	_, err := s.executeCommandOnHost(host, cloneCmd)
+	return err
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -151,24 +285,39 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Process directory source if provided (for custom working directories)
+	if req.DirectorySource != nil && req.WorkingDirectory != "" {
+		host, err := s.store.GetHost(req.HostID)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+
+		if err := s.processDirectorySource(r.Context(), req.HostID, host, req.DirectorySource); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to setup working directory: "+err.Error())
+			return
+		}
+	}
+
 	now := time.Now()
 	sess := &models.Session{
-		ID:            models.NewID(),
-		Name:          req.Name,
-		HostID:        req.HostID,
-		TemplateID:    req.TemplateID,
-		Type:          req.Type,
-		AgentType:     req.AgentType,
-		Status:        models.SessionStatusPending,
-		Prompt:        req.Prompt,
-		BranchName:    req.BranchName,
-		ModelOverride: req.ModelOverride,
-		EnvVars:       req.EnvVars,
-		Plugins:       req.Plugins,
-		AllowedTools:  req.AllowedTools,
-		ExtraFlags:    req.ExtraFlags,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:               models.NewID(),
+		Name:             req.Name,
+		HostID:           req.HostID,
+		TemplateID:       req.TemplateID,
+		Type:             req.Type,
+		AgentType:        req.AgentType,
+		Status:           models.SessionStatusPending,
+		Prompt:           req.Prompt,
+		BranchName:       req.BranchName,
+		WorkingDirectory: req.WorkingDirectory,
+		ModelOverride:    req.ModelOverride,
+		EnvVars:          req.EnvVars,
+		Plugins:          req.Plugins,
+		AllowedTools:     req.AllowedTools,
+		ExtraFlags:       req.ExtraFlags,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 
 	if err := s.store.CreateSession(sess); err != nil {

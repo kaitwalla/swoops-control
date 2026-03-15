@@ -32,6 +32,7 @@ type Host struct {
 	MaxSessions          int               `json:"max_sessions" db:"max_sessions"`
 	BaseRepoPath         string            `json:"base_repo_path" db:"base_repo_path"`
 	WorktreeRoot         string            `json:"worktree_root" db:"worktree_root"`
+	DefaultRootDirectory string            `json:"default_root_directory,omitempty" db:"default_root_directory"` // Default directory for new agent sessions
 	InstalledPlugins     []PluginRef       `json:"installed_plugins"`
 	InstalledTools       []InstalledTool   `json:"installed_tools"`
 	LastHeartbeat        *time.Time        `json:"last_heartbeat,omitempty" db:"last_heartbeat"`

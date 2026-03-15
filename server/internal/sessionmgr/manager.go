@@ -32,7 +32,7 @@ type Manager struct {
 // AgentController coordinates session lifecycle via connected swoops-agent daemons.
 type AgentController interface {
 	IsHostConnected(hostID string) bool
-	LaunchSession(sess *models.Session, host *models.Host) error
+	LaunchSession(sess *models.Session, host *models.Host, serverAddr, apiKey string) error
 	StopSession(sess *models.Session, host *models.Host) error
 	SendInput(sess *models.Session, host *models.Host, input string) error
 	SendCommand(hostID, command string, args map[string]string) error
@@ -244,10 +244,22 @@ func (m *Manager) shouldUseAgent(hostID string) bool {
 }
 
 func (m *Manager) launchViaAgent(sess *models.Session, host *models.Host) error {
-	worktreePath := filepath.Join(host.WorktreeRoot, sess.Name)
+	// Determine working directory based on session configuration
+	var worktreePath string
+	if sess.WorkingDirectory != "" {
+		// Custom working directory - no worktree
+		worktreePath = ""
+	} else {
+		// Traditional worktree approach
+		worktreePath = filepath.Join(host.WorktreeRoot, sess.Name)
+	}
+
 	tmuxSession := tmuxName(sess.ID)
 	sess.Status = models.SessionStatusStarting
-	sess.WorktreePath = worktreePath
+	if worktreePath != "" {
+		sess.WorktreePath = worktreePath
+	}
+	// WorkingDirectory is already set if using custom directory
 	sess.TmuxSessionName = tmuxSession
 	now := time.Now()
 	sess.StartedAt = &now
@@ -261,7 +273,19 @@ func (m *Manager) launchViaAgent(sess *models.Session, host *models.Host) error 
 	if controller == nil {
 		return fmt.Errorf("agent controller unavailable")
 	}
-	if err := controller.LaunchSession(sess, host); err != nil {
+
+	// Determine server address for MCP config
+	var serverAddr string
+	if m.config != nil && m.config.Server.ExternalURL != "" {
+		serverAddr = m.config.Server.ExternalURL
+	} else if m.config != nil && m.config.Server.Host != "0.0.0.0" {
+		serverAddr = fmt.Sprintf("http://%s:%d", m.config.Server.Host, m.config.Server.Port)
+	} else if m.config != nil {
+		// Fallback to host's hostname
+		serverAddr = fmt.Sprintf("http://%s:%d", host.Hostname, m.config.Server.Port)
+	}
+
+	if err := controller.LaunchSession(sess, host, serverAddr, host.AgentAuthToken); err != nil {
 		return err
 	}
 
@@ -322,12 +346,22 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 
 	tmuxRunner := &tmux.Runner{ExecFunc: execFn}
 
-	// For shell sessions, use a simple working directory
+	// Determine working directory based on session type and configuration
 	var workDir string
+	var useWorktree bool
+
 	if sess.Type == models.SessionTypeShell {
+		// Shell sessions use home directory
 		workDir = "~"
+		useWorktree = false
+	} else if sess.WorkingDirectory != "" {
+		// Agent session with custom working directory (no worktree needed)
+		workDir = sess.WorkingDirectory
+		useWorktree = false
 	} else {
+		// Agent session using traditional worktree approach
 		workDir = filepath.Join(host.WorktreeRoot, sess.Name)
+		useWorktree = true
 	}
 
 	tmuxSession := tmuxName(sess.ID)
@@ -335,7 +369,10 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 	// Update session to starting
 	sess.Status = models.SessionStatusStarting
 	if sess.Type == models.SessionTypeAgent {
-		sess.WorktreePath = workDir
+		if useWorktree {
+			sess.WorktreePath = workDir
+		}
+		// WorkingDirectory is already set if using custom directory
 	}
 	sess.TmuxSessionName = tmuxSession
 	now := time.Now()
@@ -344,23 +381,32 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 		return fmt.Errorf("update session to starting: %w", err)
 	}
 
-	// For agent sessions, set up worktree and MCP config
+	// For agent sessions, set up worktree (if needed) and MCP config
 	if sess.Type == models.SessionTypeAgent {
-		wtManager := &worktree.Manager{ExecFunc: execFn}
+		if useWorktree {
+			// Traditional worktree-based approach
+			wtManager := &worktree.Manager{ExecFunc: execFn}
 
-		// 1. Ensure worktree root exists
-		if _, err := client.Exec(fmt.Sprintf("mkdir -p %s", shellQuote(host.WorktreeRoot))); err != nil {
-			m.failSession(sess, fmt.Errorf("create worktree root: %w", err))
-			return err
+			// 1. Ensure worktree root exists
+			if _, err := client.Exec(fmt.Sprintf("mkdir -p %s", shellQuote(host.WorktreeRoot))); err != nil {
+				m.failSession(sess, fmt.Errorf("create worktree root: %w", err))
+				return err
+			}
+
+			// 2. Create git worktree
+			if err := wtManager.Create(host.BaseRepoPath, workDir, sess.BranchName); err != nil {
+				m.failSession(sess, fmt.Errorf("create worktree: %w", err))
+				return err
+			}
+		} else {
+			// Custom working directory - ensure it exists (it should have been created during setup)
+			if _, err := client.Exec(fmt.Sprintf("test -d %s", shellQuote(workDir))); err != nil {
+				m.failSession(sess, fmt.Errorf("working directory does not exist: %s", workDir))
+				return err
+			}
 		}
 
-		// 2. Create git worktree
-		if err := wtManager.Create(host.BaseRepoPath, workDir, sess.BranchName); err != nil {
-			m.failSession(sess, fmt.Errorf("create worktree: %w", err))
-			return err
-		}
-
-		// 2.5. Generate and install MCP config
+		// Generate and install MCP config
 		if err := m.installMCPConfigSSH(client, sess, host, workDir); err != nil {
 			log.Printf("warn: failed to install MCP config for session %s: %v", sess.ID, err)
 			// Non-fatal: continue session launch even if MCP config fails
@@ -369,8 +415,8 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 
 	// 3. Create tmux session
 	if err := tmuxRunner.CreateSession(tmuxSession, workDir); err != nil {
-		// Clean up worktree on failure for agent sessions
-		if sess.Type == models.SessionTypeAgent {
+		// Clean up worktree on failure for agent sessions (only if using worktree)
+		if sess.Type == models.SessionTypeAgent && useWorktree {
 			wtManager := &worktree.Manager{ExecFunc: execFn}
 			wtManager.Remove(host.BaseRepoPath, workDir)
 		}
@@ -383,8 +429,11 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 		agentCmd := buildAgentCommand(sess)
 		if err := tmuxRunner.SendKeys(tmuxSession, agentCmd); err != nil {
 			tmuxRunner.KillSession(tmuxSession)
-			wtManager := &worktree.Manager{ExecFunc: execFn}
-			wtManager.Remove(host.BaseRepoPath, workDir)
+			// Clean up worktree on failure (only if using worktree)
+			if useWorktree {
+				wtManager := &worktree.Manager{ExecFunc: execFn}
+				wtManager.Remove(host.BaseRepoPath, workDir)
+			}
 			m.failSession(sess, fmt.Errorf("launch agent: %w", err))
 			return err
 		}
@@ -411,7 +460,11 @@ func (m *Manager) launchViaSSH(sess *models.Session, host *models.Host) error {
 	if sess.Type == models.SessionTypeShell {
 		log.Printf("shell session %s launched on host %s (tmux: %s)", sess.ID, host.Name, tmuxSession)
 	} else {
-		log.Printf("agent session %s launched on host %s (tmux: %s, worktree: %s)", sess.ID, host.Name, tmuxSession, workDir)
+		if useWorktree {
+			log.Printf("agent session %s launched on host %s (tmux: %s, worktree: %s)", sess.ID, host.Name, tmuxSession, workDir)
+		} else {
+			log.Printf("agent session %s launched on host %s (tmux: %s, workdir: %s)", sess.ID, host.Name, tmuxSession, workDir)
+		}
 	}
 	return nil
 }

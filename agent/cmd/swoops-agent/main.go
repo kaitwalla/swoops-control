@@ -562,54 +562,84 @@ func (a *agentRuntime) handleLaunch(cmd *agentrpc.SessionCommand) error {
 		return a.sendOutput(cmd.SessionID, "shell session launched via swoops-agent")
 	}
 
-	// Handle agent sessions (claude/codex in a worktree)
+	// Handle agent sessions (claude/codex in a worktree or custom directory)
 	baseRepoPath := args["base_repo_path"]
 	worktreePath := args["worktree_path"]
+	workingDirectory := args["working_directory"]
 	branchName := args["branch_name"]
 	agentType := args["agent_type"]
 	prompt := args["prompt"]
 	modelOverride := args["model_override"]
 
-	if baseRepoPath == "" || worktreePath == "" || branchName == "" || prompt == "" || cmd.SessionID == "" {
-		return fmt.Errorf("launch command missing required args")
+	if prompt == "" || cmd.SessionID == "" {
+		return fmt.Errorf("launch command missing required args (prompt, session_id)")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
-		return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("mkdir worktree root: %w", err))
-	}
+	// Determine working directory and whether to use worktree
+	var workDir string
+	var useWorktree bool
 
-	if err := a.wt.Create(baseRepoPath, worktreePath, branchName); err != nil {
-		return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("create worktree: %w", err))
+	if workingDirectory != "" {
+		// Custom working directory - no worktree needed
+		workDir = workingDirectory
+		useWorktree = false
+
+		// Verify directory exists
+		if _, err := os.Stat(workDir); err != nil {
+			return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("working directory does not exist: %s", workDir))
+		}
+	} else {
+		// Traditional worktree approach
+		workDir = worktreePath
+		useWorktree = true
+
+		if baseRepoPath == "" || worktreePath == "" || branchName == "" {
+			return fmt.Errorf("launch command missing required args for worktree (base_repo_path, worktree_path, branch_name)")
+		}
+
+		if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
+			return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("mkdir worktree root: %w", err))
+		}
+
+		if err := a.wt.Create(baseRepoPath, worktreePath, branchName); err != nil {
+			return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("create worktree: %w", err))
+		}
 	}
 
 	// Generate MCP config for AI agent tools
 	serverAddr := args["server_addr"]
 	apiKey := args["api_key"]
 	if serverAddr != "" && apiKey != "" {
-		if err := a.generateMCPConfig(cmd.SessionID, agentType, worktreePath, serverAddr, apiKey); err != nil {
+		if err := a.generateMCPConfig(cmd.SessionID, agentType, workDir, serverAddr, apiKey); err != nil {
 			log.Printf("warn: failed to generate MCP config for session %s: %v", cmd.SessionID, err)
 			// Non-fatal: continue session launch
 		}
 	}
 
-	if err := a.tmux.CreateSession(tmuxSession, worktreePath); err != nil {
-		_ = a.wt.Remove(baseRepoPath, worktreePath)
+	if err := a.tmux.CreateSession(tmuxSession, workDir); err != nil {
+		if useWorktree {
+			_ = a.wt.Remove(baseRepoPath, worktreePath)
+		}
 		return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("create tmux session: %w", err))
 	}
 
 	agentCmd := buildAgentCommand(agentType, prompt, modelOverride)
 	if err := a.tmux.SendKeys(tmuxSession, agentCmd); err != nil {
 		_ = a.tmux.KillSession(tmuxSession)
-		_ = a.wt.Remove(baseRepoPath, worktreePath)
+		if useWorktree {
+			_ = a.wt.Remove(baseRepoPath, worktreePath)
+		}
 		return a.sendErrorOutput(cmd.SessionID, fmt.Errorf("launch agent command: %w", err))
 	}
 
 	sr := &sessionRuntime{
-		sessionID:    cmd.SessionID,
-		baseRepoPath: baseRepoPath,
-		worktreePath: worktreePath,
-		tmuxSession:  tmuxSession,
-		stopPoll:     make(chan struct{}),
+		sessionID:   cmd.SessionID,
+		tmuxSession: tmuxSession,
+		stopPoll:    make(chan struct{}),
+	}
+	if useWorktree {
+		sr.baseRepoPath = baseRepoPath
+		sr.worktreePath = worktreePath
 	}
 	a.mu.Lock()
 	// If relaunching same session id, stop prior poller.

@@ -151,6 +151,11 @@ func (s *Server) setupRoutes() {
 			// User management (current user - available to all authenticated users)
 			r.Get("/auth/me", s.handleGetCurrentUser)
 
+			// GitHub integration
+			r.Put("/github/token", s.handleUpdateGitHubToken)
+			r.Get("/github/repos", s.handleListGitHubRepos)
+			r.Post("/github/repos", s.handleCreateGitHubRepo)
+
 			// Admin-only endpoints
 			r.Group(func(r chi.Router) {
 				r.Use(s.RequireAdmin())
@@ -178,6 +183,11 @@ func (s *Server) setupRoutes() {
 					r.Get("/sessions", s.handleListHostSessions)
 					r.Post("/update", s.handleUpdateAgent)
 					r.Post("/check-updates", s.handleCheckForUpdates)
+
+					// Filesystem operations
+					r.Post("/directories/list", s.handleListHostDirectories)
+					r.Post("/directories/create", s.handleCreateHostDirectory)
+					r.Post("/repositories/clone", s.handleCloneRepository)
 				})
 			})
 

@@ -30,6 +30,7 @@ export interface Host {
   max_sessions: number;
   base_repo_path: string;
   worktree_root: string;
+  default_root_directory?: string;
   installed_plugins: PluginRef[];
   installed_tools: InstalledTool[];
   last_heartbeat: string | null;
@@ -47,4 +48,5 @@ export interface CreateHostRequest {
   labels: Record<string, string>;
   base_repo_path: string;
   worktree_root: string;
+  default_root_directory?: string;
 }

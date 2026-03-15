@@ -260,13 +260,22 @@ func (s *Service) IsHostConnected(hostID string) bool {
 }
 
 // LaunchSession sends a launch session command to the agent.
-func (s *Service) LaunchSession(sess *models.Session, host *models.Host) error {
+func (s *Service) LaunchSession(sess *models.Session, host *models.Host, serverAddr, apiKey string) error {
 	args := map[string]string{
-		"session_id":   sess.ID,
-		"session_type": string(sess.Type),
-		"work_dir":     sess.WorktreePath,
-		"prompt":       sess.Prompt,
+		"session_id":        sess.ID,
+		"session_type":      string(sess.Type),
+		"prompt":            sess.Prompt,
+		"base_repo_path":    host.BaseRepoPath,
+		"worktree_path":     sess.WorktreePath,
+		"working_directory": sess.WorkingDirectory,
+		"branch_name":       sess.BranchName,
+		"agent_type":        string(sess.AgentType),
+		"model_override":    sess.ModelOverride,
+		"tmux_session":      sess.TmuxSessionName,
+		"server_addr":       serverAddr,
+		"api_key":           apiKey,
 	}
+
 	return s.SendCommand(host.ID, agentrpc.CommandLaunch, args)
 }
 
