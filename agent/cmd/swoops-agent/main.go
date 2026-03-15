@@ -791,6 +791,22 @@ func restartAgentService() error {
 		return cmd.Run()
 	} else if runtime.GOOS == "darwin" {
 		// launchd on macOS
+		// Try user agent first (most common for desktop/development)
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			userPlist := filepath.Join(homeDir, "Library", "LaunchAgents", "com.swoops.agent.plist")
+			if _, err := os.Stat(userPlist); err == nil {
+				// User agent - need to get UID
+				uid := os.Getuid()
+				target := fmt.Sprintf("gui/%d/com.swoops.agent", uid)
+				cmd := exec.Command("launchctl", "kickstart", "-k", target)
+				if err := cmd.Run(); err == nil {
+					return nil
+				}
+			}
+		}
+
+		// Try system daemon as fallback
 		cmd := exec.Command("launchctl", "kickstart", "-k", "system/com.swoops.agent")
 		return cmd.Run()
 	}

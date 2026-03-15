@@ -38,8 +38,8 @@ type WAFConfig struct {
 func DefaultWAFConfig() WAFConfig {
 	return WAFConfig{
 		RateLimitEnabled:   true,
-		RequestsPerMinute:  60,
-		BurstSize:          10,
+		RequestsPerMinute:  300,
+		BurstSize:          50,
 		FilterEnabled:      true,
 		MaxRequestBodySize: 10 * 1024 * 1024, // 10MB
 		BlockSuspiciousUA:  true,
