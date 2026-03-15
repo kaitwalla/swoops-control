@@ -150,6 +150,7 @@ func (s *Server) setupRoutes() {
 
 			// User management (current user - available to all authenticated users)
 			r.Get("/auth/me", s.handleGetCurrentUser)
+			r.Put("/auth/password", s.handleUpdatePassword)
 
 			// GitHub integration
 			r.Put("/github/token", s.handleUpdateGitHubToken)

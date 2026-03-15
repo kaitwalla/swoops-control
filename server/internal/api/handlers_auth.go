@@ -208,3 +208,48 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
 }
+
+// handleUpdatePassword allows a user to change their own password.
+func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	// Get user from context (set by auth middleware)
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		http.Error(w, "current_password and new_password required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate new password length
+	if len(req.NewPassword) < 8 {
+		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Update password
+	if err := s.store.UpdateUserPassword(userID, req.CurrentPassword, req.NewPassword); err != nil {
+		if strings.Contains(err.Error(), "invalid current password") {
+			http.Error(w, "current password is incorrect", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("Failed to update password for user %s: %v", userID, err)
+		http.Error(w, "failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

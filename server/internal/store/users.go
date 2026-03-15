@@ -312,3 +312,46 @@ func (s *Store) UpdateUserGitHubToken(userID, token string) error {
 
 	return nil
 }
+
+// UpdateUserPassword updates a user's password after verifying the current password.
+func (s *Store) UpdateUserPassword(userID, currentPassword, newPassword string) error {
+	// Get the user to verify current password
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	// Verify current password
+	if err := s.VerifyPassword(user, currentPassword); err != nil {
+		return fmt.Errorf("invalid current password")
+	}
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	// Update the password
+	now := time.Now()
+	result, err := s.db.Exec(`
+		UPDATE users
+		SET password_hash = ?, updated_at = ?
+		WHERE id = ?
+	`, string(hashedPassword), now, userID)
+
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
