@@ -155,6 +155,32 @@ func main() {
 		}
 	}()
 
+	// Periodically check for stuck sessions and mark them as failed
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Find sessions stuck in starting/pending for more than 5 minutes
+			stuckSessions, err := db.FindStuckSessions(5 * time.Minute)
+			if err != nil {
+				log.Printf("Error finding stuck sessions: %v", err)
+				continue
+			}
+
+			for _, sess := range stuckSessions {
+				log.Printf("Marking stuck session as failed: %s (status=%s, age=%s)",
+					sess.ID, sess.Status, time.Since(sess.UpdatedAt))
+
+				sess.Status = models.SessionStatusFailed
+				sess.LastOutput = "Session timed out - failed to start within 5 minutes"
+				if err := db.UpdateSession(sess); err != nil {
+					log.Printf("Error updating stuck session %s: %v", sess.ID, err)
+				}
+			}
+		}
+	}()
+
 	// Start HTTP redirect server for autocert (handles ACME challenges on port 80)
 	var httpRedirectServer *http.Server
 	if cfg.Server.AutocertEnabled {

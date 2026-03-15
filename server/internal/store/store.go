@@ -394,6 +394,46 @@ func (s *Store) DeleteSession(id string) error {
 	return checkRowsAffected(res)
 }
 
+// FindStuckSessions returns sessions that have been in starting/pending state for longer than the timeout.
+func (s *Store) FindStuckSessions(timeout time.Duration) ([]*models.Session, error) {
+	cutoff := time.Now().Add(-timeout)
+
+	rows, err := s.db.Query(`
+		SELECT id, host_id, type, name, status, worktree_path, tmux_session, agent_pid,
+		       prompt, env_vars, mcp_servers, plugins, allowed_tools, extra_flags,
+		       last_output, created_at, updated_at
+		FROM sessions
+		WHERE (status = ? OR status = ?) AND updated_at < ?`,
+		models.SessionStatusStarting, models.SessionStatusPending, cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*models.Session
+	for rows.Next() {
+		sess := &models.Session{}
+		var envJSON, mcpJSON, pluginsJSON, toolsJSON, flagsJSON []byte
+		err := rows.Scan(
+			&sess.ID, &sess.HostID, &sess.Type, &sess.Name, &sess.Status,
+			&sess.WorktreePath, &sess.TmuxSessionName, &sess.AgentPID,
+			&sess.Prompt, &envJSON, &mcpJSON, &pluginsJSON, &toolsJSON, &flagsJSON,
+			&sess.LastOutput, &sess.CreatedAt, &sess.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		json.Unmarshal(envJSON, &sess.EnvVars)
+		json.Unmarshal(mcpJSON, &sess.MCPServers)
+		json.Unmarshal(pluginsJSON, &sess.Plugins)
+		json.Unmarshal(toolsJSON, &sess.AllowedTools)
+		json.Unmarshal(flagsJSON, &sess.ExtraFlags)
+		sessions = append(sessions, sess)
+	}
+	return sessions, rows.Err()
+}
+
 func checkRowsAffected(res sql.Result) error {
 	n, err := res.RowsAffected()
 	if err != nil {
