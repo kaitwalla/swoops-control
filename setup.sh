@@ -1793,6 +1793,44 @@ EOF
                 EXEC_START="$(which swoops-agent || echo '/usr/local/bin/swoops-agent') run --server \$SWOOPS_SERVER --host-id \$SWOOPS_HOST_ID --auth-token \$SWOOPS_AUTH_TOKEN"
             fi
 
+            # Build comprehensive PATH for agent service
+            # Start with standard Linux paths
+            AGENT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+            # Add OS-specific paths based on detected OS
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                case "$ID" in
+                    ubuntu|debian)
+                        # Debian/Ubuntu sometimes install to /snap or /usr/games
+                        AGENT_PATH="$AGENT_PATH:/snap/bin:/usr/games:/usr/local/games"
+                        ;;
+                    fedora|rhel|centos|rocky|almalinux)
+                        # RHEL-based systems may have /opt paths
+                        AGENT_PATH="$AGENT_PATH:/opt/bin"
+                        ;;
+                    arch|manjaro)
+                        # Arch derivatives
+                        AGENT_PATH="$AGENT_PATH:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl"
+                        ;;
+                esac
+            fi
+
+            # Check if tmux is installed and add its directory to PATH if found
+            if command -v tmux &> /dev/null; then
+                TMUX_PATH=$(which tmux)
+                TMUX_DIR=$(dirname "$TMUX_PATH")
+                info "Found tmux at: $TMUX_PATH"
+
+                # Add tmux directory to PATH if it's not already in our standard paths
+                if [[ ":$AGENT_PATH:" != *":$TMUX_DIR:"* ]]; then
+                    AGENT_PATH="$TMUX_DIR:$AGENT_PATH"
+                fi
+            else
+                warn "tmux not found in PATH. Agent sessions require tmux to be installed."
+                warn "Please install tmux: sudo apt-get install tmux (Debian/Ubuntu) or sudo yum install tmux (RHEL/CentOS)"
+            fi
+
             sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Swoops Agent
@@ -1803,7 +1841,7 @@ Type=simple
 User=$AGENT_USER
 Group=$AGENT_GROUP
 WorkingDirectory=/opt/swoops
-Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=$AGENT_PATH"
 EnvironmentFile=$AGENT_CONFIG
 ExecStart=$EXEC_START
 Restart=always
@@ -1838,6 +1876,28 @@ EOF
 
             # Source environment variables for plist
             source "$AGENT_CONFIG"
+
+            # Build comprehensive PATH for agent on macOS
+            # Start with standard macOS paths
+            AGENT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+            # Add Homebrew paths (both Intel and Apple Silicon locations)
+            AGENT_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/Homebrew/bin:$AGENT_PATH"
+
+            # Check if tmux is installed and add its directory to PATH if found
+            if command -v tmux &> /dev/null; then
+                TMUX_PATH=$(which tmux)
+                TMUX_DIR=$(dirname "$TMUX_PATH")
+                info "Found tmux at: $TMUX_PATH"
+
+                # Add tmux directory to PATH if it's not already in our standard paths
+                if [[ ":$AGENT_PATH:" != *":$TMUX_DIR:"* ]]; then
+                    AGENT_PATH="$TMUX_DIR:$AGENT_PATH"
+                fi
+            else
+                warn "tmux not found in PATH. Agent sessions require tmux to be installed."
+                warn "Please install tmux: brew install tmux"
+            fi
 
             # Build program arguments array based on TLS/mTLS configuration
             if [ "$AGENT_MTLS_ENABLED" = true ]; then
@@ -1892,6 +1952,11 @@ EOF
     <array>
 $PLIST_ARGS
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$AGENT_PATH</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
