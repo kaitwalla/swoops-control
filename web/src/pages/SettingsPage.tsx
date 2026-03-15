@@ -15,11 +15,11 @@ export function SettingsPage() {
     // Check if GitHub token is configured by trying to list repos
     setVerifying(true);
     githubApi.listRepos()
-      .then((repos) => {
+      .then(() => {
         setIsConfigured(true);
         setVerifying(false);
       })
-      .catch((err) => {
+      .catch(() => {
         setIsConfigured(false);
         setVerifying(false);
       });
