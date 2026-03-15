@@ -21,8 +21,11 @@ export function SessionsPage() {
 
   const hostMap = Object.fromEntries(hosts.map((h) => [h.id, h]));
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this session?')) {
+  const handleDelete = async (id: string, isActive: boolean) => {
+    const message = isActive
+      ? 'This session is running. Are you sure you want to stop and delete it?'
+      : 'Are you sure you want to delete this session?';
+    if (window.confirm(message)) {
       await deleteSession(id);
     }
   };
@@ -104,15 +107,13 @@ export function SessionsPage() {
                           <Square size={14} />
                         </button>
                       )}
-                      {['stopped', 'failed'].includes(sess.status) && (
-                        <button
-                          onClick={() => handleDelete(sess.id)}
-                          className="text-gray-500 hover:text-red-400"
-                          title="Delete session"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleDelete(sess.id, ['running', 'starting', 'pending'].includes(sess.status))}
+                        className="text-gray-500 hover:text-red-400"
+                        title={['running', 'starting', 'pending'].includes(sess.status) ? "Stop and delete session" : "Delete session"}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
