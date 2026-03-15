@@ -1803,6 +1803,7 @@ Type=simple
 User=$AGENT_USER
 Group=$AGENT_GROUP
 WorkingDirectory=/opt/swoops
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile=$AGENT_CONFIG
 ExecStart=$EXEC_START
 Restart=always
