@@ -22,6 +22,9 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate, onCheckForUpd
     setUpdateError(null);
     try {
       await onUpdate(host.id);
+      // Show success message briefly
+      setUpdateError('Update command sent - agent will update and restart');
+      setTimeout(() => setUpdateError(null), 5000);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to trigger update';
       setUpdateError(errorMessage);
@@ -36,6 +39,9 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate, onCheckForUpd
     setUpdateError(null);
     try {
       await onCheckForUpdates(host.id);
+      // Show success message briefly
+      setUpdateError('Checking for updates...');
+      setTimeout(() => setUpdateError(null), 3000);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to check for updates';
       setUpdateError(errorMessage);
@@ -67,7 +73,7 @@ export function HostCard({ host, sessionCount, onDelete, onUpdate, onCheckForUpd
           </div>
         )}
         {updateError && (
-          <div className="text-red-400 text-xs">
+          <div className={`text-xs ${updateError.includes('command sent') || updateError.includes('Checking') ? 'text-green-400' : 'text-red-400'}`}>
             {updateError}
           </div>
         )}
