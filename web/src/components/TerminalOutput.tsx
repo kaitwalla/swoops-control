@@ -102,8 +102,8 @@ export function TerminalOutput({ initialOutput, sessionId, isActive }: TerminalO
     ? (() => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        const apiKey = localStorage.getItem('swoops_api_key') || '';
-        return `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(apiKey)}`;
+        const sessionToken = localStorage.getItem('swoops_session_token') || '';
+        return `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(sessionToken)}`;
       })()
     : '';
 

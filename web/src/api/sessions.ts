@@ -22,10 +22,10 @@ export const sessionsApi = {
 export function createOutputWebSocket(sessionId: string): WebSocket {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  const apiKey = localStorage.getItem('swoops_api_key') || '';
-  // Pass API key as query param since WebSocket doesn't support custom headers in browser
+  const sessionToken = localStorage.getItem('swoops_session_token') || '';
+  // Pass session token as query param since WebSocket doesn't support custom headers in browser
   const ws = new WebSocket(
-    `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(apiKey)}`
+    `${protocol}//${host}/api/v1/ws/sessions/${sessionId}/output?token=${encodeURIComponent(sessionToken)}`
   );
   return ws;
 }

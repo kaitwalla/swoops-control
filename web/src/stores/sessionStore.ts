@@ -21,7 +21,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const sessions = await sessionsApi.list(params);
-      set({ sessions, loading: false });
+      // Only update if data has changed to avoid unnecessary re-renders
+      const current = get().sessions;
+      const hasChanged = JSON.stringify(current) !== JSON.stringify(sessions);
+      if (hasChanged) {
+        set({ sessions, loading: false });
+      } else {
+        set({ loading: false });
+      }
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
