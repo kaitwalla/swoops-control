@@ -38,6 +38,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       ...(options?.headers as Record<string, string>),
     },
   });
+
+  // Handle authentication failures
+  if (res.status === 401 || res.status === 403) {
+    // Clear stale auth tokens
+    localStorage.removeItem('swoops_session_token');
+    localStorage.removeItem('swoops_api_key');
+
+    // Redirect to login page (unless already on login)
+    if (!window.location.pathname.includes('/login')) {
+      window.location.href = '/login';
+    }
+
+    throw new Error('Authentication expired. Please log in again.');
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || res.statusText);
