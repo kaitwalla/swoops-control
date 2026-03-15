@@ -65,6 +65,9 @@ func (s *Store) migrate() error {
 		"migrations/006_add_session_type.sql",
 		"migrations/007_add_host_update_info.sql",
 		"migrations/008_add_agent_user.sql",
+		"migrations/009_add_default_root_directory.sql",
+		"migrations/010_add_github_token.sql",
+		"migrations/011_add_working_directory.sql",
 	}
 
 	for _, migration := range migrations {
