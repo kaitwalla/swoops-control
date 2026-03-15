@@ -109,9 +109,10 @@ func (waf *WAFMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Rate limiting
+		// Rate limiting (exempt WebSocket upgrades to avoid blocking reconnections)
 		if waf.config.RateLimitEnabled {
-			if !waf.rateLimiter.Allow(clientIP) {
+			isWebSocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+			if !isWebSocket && !waf.rateLimiter.Allow(clientIP) {
 				waf.blockRequest(w, r, "rate_limit_exceeded", clientIP)
 				return
 			}
