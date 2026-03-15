@@ -67,6 +67,13 @@ func (s *Service) UpdateHeartbeat(ctx context.Context, hostID string, req Heartb
 		return fmt.Errorf("update heartbeat: %w", err)
 	}
 
+	// Update agent version if provided
+	if req.CurrentVersion != "" {
+		if err := s.store.UpdateAgentVersion(hostID, req.CurrentVersion); err != nil {
+			s.logger.Error("failed to update agent version", "error", err, "host_id", hostID)
+		}
+	}
+
 	// Update version info if provided
 	if req.UpdateAvailable {
 		if err := s.store.UpdateHostUpdateInfo(hostID, req.UpdateAvailable, req.LatestVersion, req.UpdateURL); err != nil {

@@ -235,6 +235,20 @@ func (s *Store) TouchHostHeartbeat(id string, at time.Time) error {
 	return checkRowsAffected(res)
 }
 
+func (s *Store) UpdateAgentVersion(id string, version string) error {
+	now := time.Now()
+	res, err := s.db.Exec(`
+		UPDATE hosts
+		SET agent_version=?, updated_at=?
+		WHERE id=?`,
+		version, now, id,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(res)
+}
+
 func (s *Store) UpdateHostUpdateInfo(id string, updateAvailable bool, latestVersion, updateURL string) error {
 	now := time.Now()
 	res, err := s.db.Exec(`
